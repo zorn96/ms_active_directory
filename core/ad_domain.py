@@ -25,7 +25,7 @@ from typing import List
 
 # local imports come after imports from other libraries
 from core.ad_session import ADSession
-from environment.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
+from environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
 from environment.format_utils import format_computer_name_for_authentication
 from environment.kerberos_utils.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
 from environment.security_utils.security_config_constants import ADEncryptionType
@@ -35,7 +35,7 @@ logger = logging_utils.get_logger()
 
 
 def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, authentication_mechanism: str=SIMPLE,
-                   computer_name: str=None, computer_location: str=None, computer_password: str=None,
+                   ad_site: str=None, computer_name: str=None, computer_location: str=None, computer_password: str=None,
                    computer_encryption_types: List[ADEncryptionType]=None, computer_hostnames: List[str]=None,
                    computer_services: List[str]=None, supports_legacy_behavior: bool=False,
                    computer_key_file_path: str=DEFAULT_KRB5_KEYTAB_FILE_LOCATION, **additional_account_attributes):
@@ -45,7 +45,7 @@ def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, a
     with strong security settings. The account's attributes follow AD naming conventions based on the computer's
     hostname by default.
     """
-    domain = ADDomain(domain_dns_name)
+    domain = ADDomain(domain_dns_name, site=ad_site)
     return domain.join(admin_user, admin_password, authentication_mechanism, computer_name=computer_name,
                        computer_location=computer_location, computer_password=computer_password,
                        computer_hostnames=computer_hostnames, computer_services=computer_services,
@@ -86,14 +86,25 @@ def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, comp
 
 class ADDomain:
 
-    def __init__(self, domain: str,
+    def __init__(self, domain: str, site: str = None,
                  ldap_servers_or_uris: List = None,
                  kerberos_uris: List = None,
                  encrypt_connections: bool = True,
                  ca_certificates_file_path: str = None,
                  discover_ldap_servers: bool = True,
                  discover_kerberos_servers: bool = True):
+        """ Initialize an interface for defining an AD domain and interacting with it.
+        :param domain: The
+        :param site:
+        :param ldap_servers_or_uris:
+        :param kerberos_uris:
+        :param encrypt_connections:
+        :param ca_certificates_file_path:
+        :param discover_ldap_servers:
+        :param discover_kerberos_servers:
+        """
         self.domain = domain.lower()  # cast to lowercase
+        self.site = site.lower() if site else None
         self.encrypt_connections = encrypt_connections
         self.ca_certificates_file_path = ca_certificates_file_path
         self.ldap_servers = []
@@ -101,10 +112,11 @@ class ADDomain:
         self.kerberos_uris = []
         # discover ldap servers and kerberos servers if we weren't provided any and weren't told not to
         if not ldap_servers_or_uris and discover_ldap_servers:
-            ldap_servers_or_uris = discover_ldap_domain_controllers_in_domain(self.domain, secure=self.encrypt_connections)
+            ldap_servers_or_uris = discover_ldap_domain_controllers_in_domain(self.domain, site=self.site,
+                                                                              secure=self.encrypt_connections)
         # discover kerberos servers if we weren't provided any and weren't told not to
         if not kerberos_uris and discover_kerberos_servers:
-            kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain)
+            kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain, site=self.site)
 
         # handle the fact that user-provided ldap servers could be servers or strings
         if ldap_servers_or_uris:
@@ -168,7 +180,8 @@ class ADDomain:
         moved up in priority, unavailable servers to be removed from the list, and previously unavailable
         servers to be added.
         """
-        ldap_uris = discover_ldap_domain_controllers_in_domain(self.domain, secure=self.encrypt_connections)
+        ldap_uris = discover_ldap_domain_controllers_in_domain(self.domain, site=self.site,
+                                                               secure=self.encrypt_connections)
         self.set_ldap_servers_or_uris(ldap_uris)
 
     def refresh_kerberos_server_discovery(self):
@@ -177,7 +190,7 @@ class ADDomain:
         moved up in priority, unavailable servers to be removed from the list, and previously unavailable
         servers to be added.
         """
-        kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain)
+        kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain, site=self.site)
         self.set_kerberos_uris(kerberos_uris)
 
     def _create_session(self, user, password, authentication_mechanism, **kwargs):

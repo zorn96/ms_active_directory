@@ -7,7 +7,7 @@ from ldap3 import (
     Connection,
     SUBTREE,
 )
-from typing import TYPE_CHECKING
+from typing import List, TYPE_CHECKING
 # allow type hinting without creating a circular import
 if TYPE_CHECKING:
     from core.ad_domain import ADDomain
@@ -63,7 +63,7 @@ class ADSession:
         """ Returns the domain that this session is connected to """
         return self.domain_dns_name
 
-    def dn_exists_in_domain(self, distinguished_name):
+    def dn_exists_in_domain(self, distinguished_name: str):
         """ Check if a distinguished name exists within the domain, regardless of what it is.
         :param distinguished_name: Either a relative distinguished name or full distinguished name
                                    to search for within the domain.
@@ -80,7 +80,7 @@ class ADSession:
                                            search_scope=BASE,
                                            size_limit=1)
 
-    def object_exists_in_domain_with_attribute(self, attr, unescaped_value):
+    def object_exists_in_domain_with_attribute(self, attr: str, unescaped_value: str):
         """ Check if any objects exist in the domain with a given attribute. Returns True if so, False otherwise.
         :param attr: The LDAP attribute to examine in the search.
         :param unescaped_value: The value of the attribute that we're looking for, in its raw form.
@@ -99,7 +99,7 @@ class ADSession:
                                            search_scope=SUBTREE,
                                            size_limit=1)
 
-    def _create_object(self, object_dn, object_classes, account_attr_dict):
+    def _create_object(self, object_dn: str, object_classes: List[str], account_attr_dict: dict):
         if self.dn_exists_in_domain(object_dn):
             raise Exception('An object already exists within the domain with distinguished name {} - please remove it '
                             'or change the attributes specified such that a different distinguished name is created.'
@@ -111,8 +111,9 @@ class ADSession:
         raise Exception('An exception was encountered creating an object with distinguished name {} and object classes '
                         '{}. LDAP result: {}'.format(object_dn, object_classes, self.ldap_connection.result))
 
-    def create_computer(self, computer_name, computer_location=None, computer_password=None,
-                        encryption_types=None, hostnames=None, services=None, supports_legacy_behavior=False,
+    def create_computer(self, computer_name: str, computer_location: str=None, computer_password: str=None,
+                        encryption_types: List[security_constants.ADEncryptionType]=None, hostnames: List[str]=None,
+                        services: List[str]=None, supports_legacy_behavior: bool=False,
                         **additional_account_attributes):
         """ Use the session to create a computer in the domain and return a computer object.
         :param computer_name: The common name of the computer to create in the AD domain. This
@@ -226,7 +227,7 @@ class ADSession:
         return ADComputer(samaccount_name, self.domain, computer_location, computer_password, spns,
                           encryption_types)
 
-    def take_over_existing_computer(self, computer_name):
+    def take_over_existing_computer(self, computer_name: str):
         """ Use the session to take over a computer in the domain and return a computer object.
         This resets the computer's password so that nobody else can impersonate it, and reads
         the computer's attributes in order to create a computer object and return it.

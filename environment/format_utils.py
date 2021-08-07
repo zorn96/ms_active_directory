@@ -52,7 +52,7 @@ def format_computer_name_for_authentication(computer_name: str, domain: str, aut
     return adjusted_computer_name
 
 
-def format_hostname_or_ip_and_port_to_uri(host_or_ip, port, is_ipv6_fmt=None):
+def format_hostname_or_ip_and_port_to_uri(host_or_ip: str, port: str, is_ipv6_fmt: bool=None):
     """ Combine what is either an ipv4 address, ipv6 address, or hostname and (optionally) a port
     into the proper format.
     """

@@ -2,6 +2,7 @@ import logging_utils
 
 from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
+from typing import List
 
 from environment.ldap_utils.ldap_constants import (
     AD_USERNAME_RESTRICTED_CHARS,
@@ -13,7 +14,7 @@ from environment.ldap_utils.ldap_constants import (
 logger = logging_utils.get_logger()
 
 
-def is_dn(anything):
+def is_dn(anything: str):
     """ Determine if a specified string is a distinguished name. """
     try:
         parse_dn(anything)
@@ -22,14 +23,14 @@ def is_dn(anything):
         return False
 
 
-def construct_default_hostnames_for_computer(computer_name, domain_dns_name):
+def construct_default_hostnames_for_computer(computer_name: str, domain_dns_name: str):
     """ Construct the default hostnames for a computer in AD. The short hostname is the computer name capitalized,
     and the fqdn is lowercase of the computer name dot the domain.
     """
     return [computer_name.upper(), computer_name.lower() + '.' + domain_dns_name.lower()]
 
 
-def construct_object_distinguished_name(object_name, object_location, domain):
+def construct_object_distinguished_name(object_name: str, object_location: str, domain: str):
     """
     Constructs the distinguished name of a computer, group, or user given the name, join location, and domain.
     """
@@ -38,7 +39,7 @@ def construct_object_distinguished_name(object_name, object_location, domain):
     return ','.join([computer_part, object_location, domain_part])
 
 
-def construct_domain_from_ldap_base_dn(domain):
+def construct_domain_from_ldap_base_dn(domain: str):
     """
     Given a base DN, constructs the DNS name of the AD domain.
     """
@@ -49,7 +50,7 @@ def construct_domain_from_ldap_base_dn(domain):
     return '.'.join(domain_pieces)
 
 
-def construct_ldap_base_dn_from_domain(domain):
+def construct_ldap_base_dn_from_domain(domain: str):
     """
     Given a domain, constructs the base dn.
     """
@@ -57,7 +58,7 @@ def construct_ldap_base_dn_from_domain(domain):
     return ','.join(map(lambda x: 'DC=' + x, domain_split))
 
 
-def construct_service_principal_names(services, hostnames):
+def construct_service_principal_names(services: List[str], hostnames: List[str]):
     """ Given a list of services and hostnames, construct the kerberos server principle names for them. """
     spns = []
     for serv in services:
@@ -66,7 +67,7 @@ def construct_service_principal_names(services, hostnames):
     return spns
 
 
-def escape_generic_filter_value(anything):
+def escape_generic_filter_value(anything: str):
     """ Escape anything, so that it can be used in ldap queries without confusing the server.
     According to the LDAP spec, there's a set of common characters that need escaping:
     rfc4514 (https://tools.ietf.org/html/rfc4514).
@@ -94,7 +95,7 @@ def escape_generic_filter_value(anything):
     return "".join(escape_char(x) for x in anything)
 
 
-def escape_dn_for_filter(anything):
+def escape_dn_for_filter(anything: str):
     """Escape an LDAP distinguished name so that it can be used in filters without confusing the server.
     Distinguished names already have some special characters escaped or encoded, so we must use this
     function instead of the generic escape function, which would escape the existing escape sequences.
@@ -105,6 +106,9 @@ def escape_dn_for_filter(anything):
     differently from the ones following CN, OU, etc.
     That's why DNs need a different escaping in filters than everything else.
     """
+    if isinstance(anything, int) or isinstance(anything, float):
+        return anything
+
     if anything.isalnum():
         return anything
 
@@ -117,7 +121,7 @@ def escape_dn_for_filter(anything):
     return "".join(escape_char(x) for x in anything)
 
 
-def normalize_object_location_in_domain(location, domain_dns_name):
+def normalize_object_location_in_domain(location: str, domain_dns_name: str):
     """ There's two main formats we might see used for an object location - LDAP style and Windows Path style.
     For each style, they can be relative or fully qualified.
 
@@ -143,7 +147,7 @@ def normalize_object_location_in_domain(location, domain_dns_name):
     return strip_domain_from_object_location(location, domain_dns_name)
 
 
-def strip_domain_from_object_location(location, domain_dns_name):
+def strip_domain_from_object_location(location: str, domain_dns_name: str):
     """ Our object Location in a domain should be a relative distinguished name (RDN), but if someone specifies the full
     path, let's be forgiving.
     This is a normalizing function to convert to RDNs.
@@ -165,7 +169,7 @@ def strip_domain_from_object_location(location, domain_dns_name):
     return location
 
 
-def validate_and_normalize_computer_name(name, supports_legacy_behavior):
+def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bool):
     """ Computer common names are sAMAccountNames without the $ at the end. So check for allowable
     characters and length limits.
     """

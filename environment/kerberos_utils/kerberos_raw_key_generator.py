@@ -51,19 +51,8 @@ def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_computer_
     return password_string_to_key(ad_encryption_type, ad_password, salt_str, AES_ITERATIONS_FOR_AD)
 
 
-def generate_raw_key_from_seed(ad_encryption_type, seed):
-    """ Given a raw seed and an encryption type, verify the seed size vs. the encryption type's seed size and then
-    generate a kerberos key for it.
-    """
-    e = _get_enc_type_profile(ad_encryption_type)
-    if len(seed) != e.seed_size:
-        raise ValueError('Wrong crypto seed length')
-    if len(seed) != e.key_size:
-        raise ValueError('Wrong key length')
-    return RawKerberosKey(e, seed)
-
-
-def password_bytes_to_key(ad_encryption_type, password_bytes, salt_bytes=None, iterations=None):
+def password_bytes_to_key(ad_encryption_type: ADEncryptionType, password_bytes: bytes, salt_bytes: bytes=None,
+                          iterations: int=None):
     """ Given an encryption type, password bytes, and optionally salt bytes and an iteration count, generate and
     return a kerberos key for the specified encryption type using the other parameters.
     """
@@ -71,7 +60,8 @@ def password_bytes_to_key(ad_encryption_type, password_bytes, salt_bytes=None, i
     return e.password_bytes_to_key(password_bytes, salt_bytes, iterations)
 
 
-def password_string_to_key(ad_encryption_type, password_string, salt_string=None, iterations=None):
+def password_string_to_key(ad_encryption_type: ADEncryptionType, password_string: str, salt_string: str=None,
+                           iterations: int=None):
     """ Given an encryption type, a string password, and optionally a string salt and an iteration count, generate and
     return a kerberos key for the specified encryption type using the other parameters.
     """
@@ -80,7 +70,7 @@ def password_string_to_key(ad_encryption_type, password_string, salt_string=None
     return password_bytes_to_key(ad_encryption_type, password_bytes, salt_bytes=salt_bytes, iterations=iterations)
 
 
-def _get_enc_type_profile(enc_type):
+def _get_enc_type_profile(enc_type: ADEncryptionType):
     if isinstance(enc_type, str):
         enc_type = ENCRYPTION_TYPE_STR_TO_ENUM.get(enc_type.lower())
     if enc_type not in AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP:
@@ -89,7 +79,7 @@ def _get_enc_type_profile(enc_type):
     return AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP[enc_type]
 
 
-def _format_aes_salt_for_ad(computer_name, domain, realm):
+def _format_aes_salt_for_ad(computer_name: str, domain: str, realm: str):
     """ Computer names and domains can be specified in any casing. However, DNS names are case insensitive, as are
     computer names in AD.
     However, salts for AES encryption are not case insensitive because AES doesn't cater to Active Directory's desires.
@@ -111,13 +101,14 @@ def _format_aes_salt_for_ad(computer_name, domain, realm):
                                             lowercase_domain=lower_domain)
     return salt_string
 
-def _zeropad(byte_string, pad_size):
+
+def _zeropad(byte_string: bytes, pad_size: int):
     # Return byte_string padded with 0 bytes to a multiple of pad_size.
     padlen = (pad_size - (len(byte_string) % pad_size)) % pad_size
     return byte_string + b'\0'*padlen
 
 
-def _nfold(string_to_fold, nbytes):
+def _nfold(string_to_fold: str, nbytes: int):
     """ This function is really hard to read because heavy math doesn't translate super well to
     python. This would actually be more readable in python2 where you can freely float between
     bytes and strings (which might be more readable computing byte-based functions using
@@ -126,7 +117,7 @@ def _nfold(string_to_fold, nbytes):
     nbytes
     https://tools.ietf.org/html/rfc3961#section-5.1
     """
-    def _rotate_right(byte_string_to_rotate, nbits):
+    def _rotate_right(byte_string_to_rotate: str, nbits: int):
         """ Rotate the bytes in str to the right by nbits bits. """
         indices = list(range(len(byte_string_to_rotate)))
         num_bytes, remain = (nbits//8) % len(byte_string_to_rotate), nbits % 8
@@ -134,7 +125,7 @@ def _nfold(string_to_fold, nbytes):
                                ((ord(byte_string_to_rotate[i-num_bytes-1]) << (8-remain)) & 0xff)])
                         for i in indices)
 
-    def _add_ones_complement(byte_str_1, byte_str_2):
+    def _add_ones_complement(byte_str_1: bytes, byte_str_2: bytes):
         """ Add equal-length strings together with end-around carry. """
         n = len(byte_str_1)
         v = [a + b for a, b in list(zip(byte_str_1, byte_str_2))]
@@ -167,7 +158,7 @@ class _EncTypeProfile(object):
     seed_size = None
 
     @classmethod
-    def password_bytes_to_key(cls, password_bytes, salt_bytes=None, iterations=None):
+    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes=None, iterations: int=None):
         raise NotImplementedError('Child classes must implement password_bytes_to_key')
 
 
@@ -180,12 +171,12 @@ class _SimplifiedEnctype(_EncTypeProfile):
     block_size = 1
 
     @classmethod
-    def basic_encrypt(clscls, key, plaintext_bytes):
+    def basic_encrypt(clscls, key: RawKerberosKey, plaintext_bytes: bytes):
         """ Placeholder to force child classes to implement this """
         raise NotImplementedError('This function must be implemented by child classes that need key derivation or encryption')
 
     @classmethod
-    def derive(cls, key, constant):
+    def derive(cls, key: RawKerberosKey, constant: str):
         """ Derive a kerberos key from some key and some constant.
         By mixing a key with a constant, you can essentially make the key
         "service-unique" so that if I use a password to generate a kerberos
@@ -223,7 +214,7 @@ class _AESEnctype(_SimplifiedEnctype):
     block_size = AES_CIPHER_BLOCK_SIZE_BYTES
 
     @classmethod
-    def password_bytes_to_key(cls, password_bytes, salt_bytes, iterations=1):
+    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes, iterations: int=1):
         # this is the pseudo-random function needed for our password-based key
         # derivation for AES
         prf = lambda p, s: HMAC.new(p, s, cls.sha_version).digest()
@@ -232,7 +223,9 @@ class _AESEnctype(_SimplifiedEnctype):
         # each subsequent iteration's input will be based on the previous
         # iterations output. this is the basic premise of the AES algorithm.
         # Seed size varies between AES128, AES256, etc. and influences the size
-        # of the seed (in bytes) that we pack into
+        # of the seed (in bytes) that we pack into.
+        # PBKDF2 can take a bytestring or string, so ignore the warning about this
+        # being bytes while a string is expected
         seed = PBKDF2(password_bytes, salt_bytes, cls.seed_size, iterations, prf)
         # our first key is a temporary key based off our our seed, which was
         # generated from our password
@@ -246,7 +239,7 @@ class _AESEnctype(_SimplifiedEnctype):
         return cls.derive(tkey, 'kerberos')
 
     @classmethod
-    def basic_encrypt(cls, key, plaintext_bytes):
+    def basic_encrypt(cls, key: RawKerberosKey, plaintext_bytes: bytes):
         # CBC = cipher block chaining
         aes = AES.new(key.key_bytes, AES.MODE_CBC, b'\0' * cls.block_size)
         # pad our plaintext to a multiple of the AES block size
@@ -282,7 +275,7 @@ class _RC4(_EncTypeProfile):
     seed_size = 16
 
     @classmethod
-    def password_bytes_to_key(cls, password_bytes, salt_bytes=None, iterations=None):
+    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes=None, iterations: bytes=None):
         # RC4 requires a shared secret that fits in the UTF8 encoding, which is
         # part of why it's considered a little less secure (smaller space).
         # we then convert the shared secret to utf16 (little-endian) and generate

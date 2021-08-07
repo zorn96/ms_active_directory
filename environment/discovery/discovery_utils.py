@@ -6,53 +6,72 @@ import dns.resolver
 import socket
 import time
 
-import format_utils
+import environment.format_utils as format_utils
 import logging_utils
 
 # environmental interactions are lightweight and primarily IO-bounded, not CPU-bounded.
 # most of our time is spent waiting on replies, so we use a thread pool instead of a
 # process pool
 from concurrent.futures import ThreadPoolExecutor
-from dns.rdatatype import SRV
-from environment_constants import (
+from dns.rdatatype import SRV, RdataType
+from ldap3 import Connection, Server, DSA
+from typing import List, Callable
+
+from environment.discovery.discovery_constants import (
     DNS_TIMEOUT_SECONDS,
     KERBEROS_DNS_SRV_FORMAT,
+    KERBEROS_SITE_AWARE_DNS_SRV_FORMAT,
     LDAP_DNS_SRV_FORMAT,
+    LDAP_SITE_AWARE_DNS_SRV_FORMAT,
 )
-from ldap3 import Connection, Server, DSA
 
 
 logger = logging_utils.get_logger()
 
 
-def discover_ldap_domain_controllers_in_domain(domain, server_limit=None, secure=True):
+def discover_ldap_domain_controllers_in_domain(domain: str, site: str=None, server_limit: int=None, secure: bool=True):
     """ Take in an AD domain and discover the LDAP servers in the domain that are domain
     controllers. Then order them to try and optimize going to the closest/fastest/highest priority
     servers first.
-    Return a tuple consisting of
-    1) an ordered list of the fastest LDAP uris (which combines the hostname and protocol).
-    2) the full ordered list of LDAP uris (which combines the hostname and protocol).
+    :param domain: The string dns name of the domain.
+    :param site: The string name of a site within the domain. If specified, only controllers within
+                 the site will be returned.
+    :param server_limit: An integer limit on the number of controllers returned. After sorting by RTT,
+                         if specified, only the fastest server_limit controllers will be returned.
+    :param secure: If true, only controllers capable of securing LDAP communication using StartTLS
+                   will be returned, and TLS negotiation time will be accounted for in the RTT evaluation.
+    :returns: a tuple consisting of an ordered list of the fastest LDAP uris (which combines the hostname and
+              protocol), and the full ordered list of LDAP uris (which combines the hostname and protocol).
     """
     logger.info('Discovering LDAP servers for domain %s in DNS', domain)
     ldap_srv = LDAP_DNS_SRV_FORMAT.format(domain=domain)
+    if site:
+        ldap_srv = LDAP_SITE_AWARE_DNS_SRV_FORMAT.format(site=site, domain=domain)
     all_ldap_records = _resolve_record_in_dns(ldap_srv, SRV)
     return _order_ldap_servers_by_rtt(all_ldap_records, server_limit, secure)
 
 
-def discover_kdc_domain_controllers_in_domain(domain, server_limit=None):
+def discover_kdc_domain_controllers_in_domain(domain: str, site: str=None, server_limit: int=None):
     """ Take in an AD domain and discover the KDCs in the domain that are domain controllers. Then
     order them to try and optimize going to the closest/fastest/highest priority servers first.
-    Return a tuple consisting of
-     1) an truncated list of the ordered list of KDC uris (which combines the hostname and port to reach out on).
-     2) The full list of KDC uris (which combines the hostname and port to reach out on).
+    :param domain: The string dns name of the domain.
+    :param site: The string name of a site within the domain. If specified, only controllers within
+                 the site will be returned.
+    :param server_limit: An integer limit on the number of controllers returned. After sorting by RTT,
+                         if specified, only the fastest server_limit controllers will be returned.
+    :returns: a tuple consisting of a truncated list of the ordered list of KDC uris (which combines the hostname
+              and port to reach out on), and the full list of KDC uris (which combines the hostname and port to
+              reach out on).
     """
     logger.info('Discovering Kerberos servers for domain %s in DNS', domain)
     krb_srv = KERBEROS_DNS_SRV_FORMAT.format(domain=domain)
+    if site:
+        krb_srv = KERBEROS_SITE_AWARE_DNS_SRV_FORMAT.format(site=site, domain=domain)
     all_ldap_records = _resolve_record_in_dns(krb_srv, SRV)
     return _order_kdcs_by_rtt(all_ldap_records, server_limit)
 
 
-def _resolve_record_in_dns(record_name, record_type):
+def _resolve_record_in_dns(record_name: str, record_type: RdataType):
     """ Take a record and record type and resolve it in DNS.
 
     Returns a list of tuples where each tuple is in the format (host, port, priority, weight)
@@ -85,10 +104,12 @@ def _resolve_record_in_dns(record_name, record_type):
     # above 0) means that a record should be preferred.
     # So we sort ascending, first by priority, and then by -1 * weight
     record_tuples = sorted(record_tuples, key=lambda record_tuple: (record_tuple[2], -1*record_tuple[3]))
+    logger.debug('Records returned in %s lookup for %s ordered by priority and weight: %s',
+                 record_type, record_name, record_tuples)
     return record_tuples
 
 
-def _order_ldap_servers_by_rtt(ldap_server_records, server_limit, secure):
+def _order_ldap_servers_by_rtt(ldap_server_records: List[tuple], server_limit: int, secure: bool):
     """ Take in a list of LDAP server records and determine the reachability and round trip time to each.
     Order them by RTT, fastest first, and drop unreachable servers. If there's more than our limit,
     trim the length based on our limit.
@@ -102,7 +123,7 @@ def _order_ldap_servers_by_rtt(ldap_server_records, server_limit, secure):
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'LDAP', server_limit)
 
 
-def _order_kdcs_by_rtt(kdc_server_records, server_limit):
+def _order_kdcs_by_rtt(kdc_server_records: List[tuple], server_limit: int):
     """ Take in a list of KDC server records and determine the reachability and round trip time to each.
     Order them by RTT, fastest first, and drop unreachable servers. If there's more than our limit,
     trim the length based on our limit.
@@ -116,7 +137,8 @@ def _order_kdcs_by_rtt(kdc_server_records, server_limit):
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'KDC', server_limit)
 
 
-def _process_sort_return_rtt_ordering_results(lookup_rtt_fns, uri_desc, maximum_result_list_length):
+def _process_sort_return_rtt_ordering_results(lookup_rtt_fns: List[Callable], uri_desc: str,
+                                              maximum_result_list_length: int):
     """ Take in a list of lookup functions that measure round trip time to the server,
     and execute all of those coroutines in parallel.
 
@@ -149,7 +171,7 @@ def _process_sort_return_rtt_ordering_results(lookup_rtt_fns, uri_desc, maximum_
     return short_list
 
 
-def _check_ldap_server_availability_and_rtt(server_host, server_port, secure):
+def _check_ldap_server_availability_and_rtt(server_host: str, server_port: str, secure: bool):
     """ Even if an LDAP server is registered in DNS, it might not be reachable for us. DNS is
     centralized, but data centers may have multiple network partitions, and there may be firewalls
     or air gaps in our way (we've seen this at customer sites).
@@ -189,7 +211,7 @@ def _check_ldap_server_availability_and_rtt(server_host, server_port, secure):
     return end - start, ldap_uri
 
 
-def _check_kdc_availability_and_rtt(server_host, server_port):
+def _check_kdc_availability_and_rtt(server_host: str, server_port: str):
     """ Even if an KDC server is registered in DNS, it might not be reachable for us. DNS is
     centralized, but data centers may have multiple network partitions, and there may be firewalls
     or air gaps in our way (we've seen this at customer sites).

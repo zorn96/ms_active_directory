@@ -60,7 +60,7 @@ def get_supported_encryption_type_enums_from_value(encryption_types_value: int):
     # we want the higher numbers first so that our encryption types are ordered by strength
     sorted_enc_type_tuples = sorted(ENCRYPTION_TYPE_VALUE_TO_ENUM.items(), reverse=True)
     encryption_types = []
-    for enc_value, encryption_type_enum  in sorted_enc_type_tuples:
+    for enc_value, encryption_type_enum in sorted_enc_type_tuples:
         # use a bitwise AND to check if this encryption type is part of our encryption type value
         if enc_value & encryption_types_value:
             encryption_types.append(encryption_type_enum)
@@ -74,7 +74,7 @@ def get_supported_encryption_type_enums_from_value(encryption_types_value: int):
     return encryption_types
 
 
-def normalize_encryption_type_list(encryption_types: List):
+def normalize_encryption_type_list(encryption_types: List[ADEncryptionType]):
     """ Given a list of encryption types, which may be strings or enums, normalize them to enums. """
     normalized_list = []
     valid_strings = sorted(ENCRYPTION_TYPE_STR_TO_ENUM.keys())
