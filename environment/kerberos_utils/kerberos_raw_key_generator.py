@@ -5,6 +5,8 @@ type and password bytes.
 Optionally, the bytes for a salt may be supplied, and iteration count may be specified
 for those encryption types that support salting or multiple iterations.
 """
+import logging_utils
+
 from functools import reduce
 
 from Crypto.Util.number import GCD
@@ -24,6 +26,8 @@ from environment.security_utils.security_config_constants import (
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
 )
+
+logger = logging_utils.get_logger()
 
 
 def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_computer_name:str, ad_password: str,

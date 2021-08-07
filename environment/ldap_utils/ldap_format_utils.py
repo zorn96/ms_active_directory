@@ -1,3 +1,4 @@
+import logging_utils
 
 from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
@@ -7,6 +8,9 @@ from environment.ldap_utils.ldap_constants import (
     SAM_ACCOUNT_NAME_LENGTH,
     LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT,
 )
+
+
+logger = logging_utils.get_logger()
 
 
 def is_dn(anything):

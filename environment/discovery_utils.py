@@ -3,11 +3,11 @@ domain controllers via DNS, as well as for sorting them by reachability.
 """
 import dns.exception
 import dns.resolver
-import logging
 import socket
 import time
 
 import format_utils
+import logging_utils
 
 # environmental interactions are lightweight and primarily IO-bounded, not CPU-bounded.
 # most of our time is spent waiting on replies, so we use a thread pool instead of a
@@ -21,7 +21,8 @@ from environment_constants import (
 )
 from ldap3 import Connection, Server, DSA
 
-logger = logging.getLogger(__name__)
+
+logger = logging_utils.get_logger()
 
 
 def discover_ldap_domain_controllers_in_domain(domain, server_limit=None, secure=True):
@@ -32,6 +33,7 @@ def discover_ldap_domain_controllers_in_domain(domain, server_limit=None, secure
     1) an ordered list of the fastest LDAP uris (which combines the hostname and protocol).
     2) the full ordered list of LDAP uris (which combines the hostname and protocol).
     """
+    logger.info('Discovering LDAP servers for domain %s in DNS', domain)
     ldap_srv = LDAP_DNS_SRV_FORMAT.format(domain=domain)
     all_ldap_records = _resolve_record_in_dns(ldap_srv, SRV)
     return _order_ldap_servers_by_rtt(all_ldap_records, server_limit, secure)
@@ -44,6 +46,7 @@ def discover_kdc_domain_controllers_in_domain(domain, server_limit=None):
      1) an truncated list of the ordered list of KDC uris (which combines the hostname and port to reach out on).
      2) The full list of KDC uris (which combines the hostname and port to reach out on).
     """
+    logger.info('Discovering Kerberos servers for domain %s in DNS', domain)
     krb_srv = KERBEROS_DNS_SRV_FORMAT.format(domain=domain)
     all_ldap_records = _resolve_record_in_dns(krb_srv, SRV)
     return _order_kdcs_by_rtt(all_ldap_records, server_limit)
@@ -66,12 +69,11 @@ def _resolve_record_in_dns(record_name, record_type):
     try:
         resolved_records = temp_resolver.resolve(record_name, record_type, tcp=True)
     except dns.exception.DNSException as dns_ex:
-        logger.info('Unable to query DNS for record {} due to: {}'
-                    .format(record_name, dns_ex))
+        logger.info('Unable to query DNS for record %s due to: %s', record_name, dns_ex)
         return []
     except Exception as ex:
-        logger.info('Unexpected exception occurred when querying DNS for record {}: {}'
-                    .format(record_name, ex))
+        logger.warning('Unexpected exception occurred when querying DNS for record %s: %s',
+                       record_name, ex)
         return []
 
     # turn our DNS records into more manageable tuples in the form:
@@ -122,6 +124,8 @@ def _process_sort_return_rtt_ordering_results(lookup_rtt_fns, uri_desc, maximum_
     URIs that could not be reached within our connection timeout and sort by round trip time.
     We then return the URIs in sorted order.
     """
+    logger.info('Sorting %s %s servers by round trip time and removing unreachable servers',
+                len(lookup_rtt_fns), uri_desc)
     rtt_results = []
     with ThreadPoolExecutor() as executor:
         running_tasks = [executor.submit(lookup_fn) for lookup_fn in lookup_rtt_fns]
@@ -133,15 +137,15 @@ def _process_sort_return_rtt_ordering_results(lookup_rtt_fns, uri_desc, maximum_
     # this will sort ascending by the first key by default, which is the round trip time. so it
     # will end up sorting the closest servers first
     rtt_uri_tuples = sorted(rtt_uri_tuples)
-    logger.info('{} servers sorted by round trip time to them: {}'.format(uri_desc, rtt_uri_tuples))
+    logger.debug('%s servers sorted by round trip time to them: %s', uri_desc, rtt_uri_tuples)
 
     result_list = [uri for _, uri in rtt_uri_tuples]
     short_list = result_list
     # if we have a limit on the number of servers we want, return it
     if maximum_result_list_length and len(result_list) > maximum_result_list_length:
         short_list = result_list[:maximum_result_list_length]
-        logger.info('Trimming list of {} servers to the fastest {} to reply due to total number exceeding our limit. '
-                    'Remaining servers: {}'.format(uri_desc, maximum_result_list_length, short_list))
+        logger.info('Trimming list of %s servers to the fastest %s to reply due to total number exceeding our limit. '
+                    'Remaining servers: %s', uri_desc, maximum_result_list_length, short_list)
     return short_list
 
 
@@ -169,11 +173,18 @@ def _check_ldap_server_availability_and_rtt(server_host, server_port, secure):
     conn = Connection(server)
     start = time.time()
     try:
-        conn.open()  # this will throw an error if the server is unresponsive or unreachable over LDAPS
+        conn.open()
         if secure:
-            conn.start_tls()
+            if not conn.start_tls():
+                logger.debug('LDAP server %s was reachable on port %s but failed to start secure communication')
+                return None
         end = time.time()
     except:
+        if secure:
+            logger.debug('LDAP server %s was unreachable on port %s or raised an exception establishing secure communication on that port',
+                         server_host, server_port)
+        else:
+            logger.debug('LDAP server %s was unreachable on port %s', server_host, server_port)
         return None
     return end - start, ldap_uri
 
@@ -214,6 +225,7 @@ def _check_kdc_availability_and_rtt(server_host, server_port):
                 end = time.time()
                 return end - start, kdc_uri
             except socket.error:
+                logger.debug('KDC server %s was unreachable on port %s', server_host, server_port)
                 pass
             finally:
                 try:

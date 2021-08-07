@@ -1,6 +1,8 @@
 import copy
 import socket
 
+import logging_utils
+
 from ldap3 import (
     Connection,
     FIRST,
@@ -27,6 +29,9 @@ from environment.discovery_utils import discover_kdc_domain_controllers_in_domai
 from environment.format_utils import format_computer_name_for_authentication
 from environment.kerberos_utils.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
 from environment.security_utils.security_config_constants import ADEncryptionType
+
+
+logger = logging_utils.get_logger()
 
 
 def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, authentication_mechanism: str=SIMPLE,
@@ -64,6 +69,9 @@ def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, comp
     # for joining a domain, default to using the local machine's hostname as a computer name
     if computer_name is None:
         computer_name = socket.gethostname()
+        logger.info('Using computer hostname as computer name to join domain: {}'.format(computer_name))
+    logger.info('Attempting to join computer to domain %s with name %s', ad_session.get_domain_dns_name(),
+                computer_name)
     computer = ad_session.create_computer(computer_name, computer_location=computer_location,
                                           computer_password=computer_password,
                                           encryption_types=computer_encryption_types, hostnames=computer_hostnames,
@@ -71,6 +79,8 @@ def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, comp
                                           **additional_account_attributes)
     if computer_key_file_path is not None:
         computer.write_full_keytab_file_for_computer(computer_key_file_path)
+    logger.info('Successfully joined computer to domain %s with name %s', ad_session.get_domain_dns_name(),
+                computer_name)
     return computer
 
 
@@ -188,6 +198,7 @@ class ADDomain:
                               **kwargs)
 
         conn.open()
+        logger.debug('Opened connection to AD domain %s: %s', self.domain, conn)
         if self.encrypt_connections:
             # if we're using LDAPS, don't StartTLS
             if not conn.server.ssl:
@@ -195,16 +206,20 @@ class ADDomain:
                 if not tls_started:
                     raise Exception('Unable to StartTLS on connection to domain. Please check the server(s) to ensure '
                                     'that they have properly configured certificates.')
+            logger.debug('Successfully secured connection to AD domain %s', self.domain)
         bound = conn.bind()
         if not bound:
             raise Exception('Failed to bind connection to {} - please check the credentials and authentication '
                             'mechanism in use.'.format(conn.server.name))
+        logger.debug('Successfully bound connection to AD domain %s to establish session', self.domain)
         session = ADSession(conn, self)
         return session
 
     def create_session_for_user(self, user: str=None, password: str=None, authentication_mechanism: str=None,
                                 **kwargs):
         """ Create a session with AD domain authenticated as the specified user. """
+        logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and user %s',
+                    self.domain, authentication_mechanism, user)
         return self._create_session(user, password, authentication_mechanism, **kwargs)
 
     def create_session_for_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
@@ -214,6 +229,8 @@ class ADDomain:
         if authentication_mechanism == SIMPLE:
             raise Exception('Computers must use a form of SASL or NTLM for authenticating LDAP communication with '
                             'and AD domain.')
+        logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and computer %s',
+                    self.domain, authentication_mechanism, computer_name)
         # when using EXTERNAL authentication (certificate-based) there might be some weird names, so let power users
         # skip our helpful name formatting/validation logic in case it causes issues
         formatted_name = computer_name

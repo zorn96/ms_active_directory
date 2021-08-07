@@ -2,6 +2,9 @@
 import binascii
 import os
 
+import logging_utils
+
+from core.ad_kerberos_keys import GssKerberosKey, RawKerberosKey
 # constants for structuring in-memory keytab representations
 from environment.kerberos_utils.kerberos_constants import (
     KEYTAB_FORMAT_VERSION_FOR_KEYTAB_FORMAT_VERSION,
@@ -26,7 +29,8 @@ from environment.kerberos_utils.kerberos_constants import (
     VNO32_FIELD_SIZE_BYTES,
 )
 
-from core.ad_kerberos_keys import GssKerberosKey, RawKerberosKey
+
+logger = logging_utils.get_logger()
 
 
 def process_keytab_bytes_to_extract_entries(keytab: bytes):

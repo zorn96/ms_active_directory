@@ -3,6 +3,8 @@ password and encryption types.
 """
 import random
 
+import logging_utils
+
 from typing import List
 
 from environment.security_utils.security_config_constants import (
@@ -12,6 +14,9 @@ from environment.security_utils.security_config_constants import (
     ENCRYPTION_TYPE_VALUE_TO_ENUM,
     UNSUPPORTED_ENC_TYPES,
 )
+
+
+logger = logging_utils.get_logger()
 
 
 def encode_password(password: str):

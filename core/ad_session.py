@@ -1,4 +1,6 @@
-from __future__ import annotations
+import copy
+
+import logging_utils
 
 from ldap3 import (
     BASE,
@@ -16,6 +18,9 @@ import environment.security_utils.security_config_utils as security_utils
 import environment.security_utils.security_config_constants as security_constants
 
 from core.ad_computer import ADComputer
+
+
+logger = logging_utils.get_logger()
 
 
 class ADSession:
@@ -83,8 +88,10 @@ class ADSession:
         """
         if ldap_utils.is_dn(unescaped_value):
             value = ldap_utils.escape_dn_for_filter(unescaped_value)
+            logger.debug('Escaped value %s of %s as distinguished name to be %s', unescaped_value, attr, value)
         else:
             value = ldap_utils.escape_generic_filter_value(unescaped_value)
+            logger.debug('Escaped value %s of %s as generic LDAP value to be %s', unescaped_value, attr, value)
         ldap_filter = '({}={})'.format(attr, value)
         # search returns True if it finds anything. we only need to find one object before stopping
         return self.ldap_connection.search(search_base=self.domain_search_base,
@@ -144,6 +151,11 @@ class ADSession:
                                               keyword arguments in order to avoid overcomplication, since most
                                               people won't set them (e.g. userAccountControl).
         """
+        logger.debug('Request to create computer in domain %s with the following attributes: computer_name=%s, '
+                     'computer_location=%s encryption_types=%s hostnames=%s services=%s supports_legacy_behavior=%s '
+                     'number of additional attributes specified: %s', self.domain_dns_name, computer_name,
+                     computer_location, encryption_types, hostnames, services, supports_legacy_behavior,
+                     len(additional_account_attributes))
         # validate our computer name and then determine our sAMAccountName
         computer_name = ldap_utils.validate_and_normalize_computer_name(computer_name, supports_legacy_behavior)
         samaccount_name = computer_name + '$'
@@ -201,6 +213,11 @@ class ADSession:
         }
         if len(hostnames) > 1:
             computer_attributes[ldap_constants.AD_ATTRIBUTE_ADDITIONAL_DNS_HOST_NAME] = hostnames[1:]
+        # don't include additional attributes for logging in case they're sensitive
+        loggable_attributes = copy.deepcopy(computer_attributes)
+        del loggable_attributes[ldap_constants.AD_ATTRIBUTE_PASSWORD]
+        logger.info('Attempting to create computer in domain %s with the following LDAP attributes: %s and %s additional attributes',
+                    loggable_attributes, len(additional_account_attributes))
 
         # add in our additional account attributes at the end so they can override anything we set here
         computer_attributes.update(additional_account_attributes)

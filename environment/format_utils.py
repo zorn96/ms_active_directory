@@ -1,4 +1,7 @@
 import ipaddress
+
+import logging_utils
+
 from ldap3 import (
     KERBEROS,
     NTLM,
@@ -12,7 +15,11 @@ from ldap3.utils.dn import (
 from environment.ldap_utils.ldap_format_utils import is_dn
 
 
+logger = logging_utils.get_logger()
+
+
 def format_computer_name_for_authentication(computer_name: str, domain: str, authentication_mechanism: str):
+    original_name = computer_name
     if is_dn(computer_name):
         parse_dn(computer_name)
         name_format = 'domain\\sAMAccountName' if authentication_mechanism == NTLM else 'sAMAccountName@domain'
@@ -40,6 +47,8 @@ def format_computer_name_for_authentication(computer_name: str, domain: str, aut
     elif authentication_mechanism == KERBEROS:
         # user needs to be 'computer_samaccount_name@domain'
         adjusted_computer_name = adjusted_computer_name + '@' + domain.lower()
+    logger.debug('Adjusted computer name %s to be %s for LDAP authentication using %s',
+                 original_name, adjusted_computer_name, authentication_mechanism)
     return adjusted_computer_name
 
 

@@ -22,6 +22,7 @@ AD_ATTRIBUTE_KVNO = 'msDS-KeyVersionNumber'
 AD_ATTRIBUTE_PASSWORD = 'unicodePwd'
 AD_ATTRIBUTE_DNS_HOST_NAME = 'dNSHostName'
 AD_ATTRIBUTE_ADDITIONAL_DNS_HOST_NAME = 'msDS-AdditionalDnsHostName'
+AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
 
 # From windows AD docs
 AD_USERNAME_RESTRICTED_CHARS = {'[', ']', ':', ';', '|', '=', '+', '*', '?', '<', '>', '/', '\\',

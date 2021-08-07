@@ -7,6 +7,7 @@ import binascii
 import math
 import time
 
+import logging_utils
 
 from typing import TYPE_CHECKING, List
 # allow type hinting without creating a circular import
@@ -34,6 +35,9 @@ from environment.kerberos_utils.kerberos_constants import (
     VNO8_FIELD_SIZE_BYTES,
     VNO32_FIELD_SIZE_BYTES,
 )
+
+
+logger = logging_utils.get_logger()
 
 
 def write_gss_kerberos_key_list_to_raw_bytes(gss_key_list: List[GssKerberosKey], keytab_format_version: int=None):

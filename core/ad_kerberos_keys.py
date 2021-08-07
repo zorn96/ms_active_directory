@@ -1,3 +1,4 @@
+import logging_utils
 
 from environment.kerberos_utils.kerberos_constants import (
     AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP,
@@ -10,6 +11,9 @@ from environment.kerberos_utils.kerberos_keytab_generator import write_complete_
 from environment.security_utils.security_config_constants import (
     ADEncryptionType
 )
+
+
+logger = logging_utils.get_logger()
 
 
 class RawKerberosKey:

@@ -1,4 +1,4 @@
-
+import logging_utils
 
 from typing import TYPE_CHECKING, List
 # allow type hinting without creating a circular import
@@ -24,6 +24,8 @@ from environment.security_utils.security_config_constants import (
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
 )
+
+logger = logging_utils.get_logger()
 
 
 class ADComputer:
@@ -58,6 +60,8 @@ class ADComputer:
         self.server_kerberos_keys = []
         self.user_kerberos_keys = []
         if self.password:
+            logger.debug('Generating kerberos keys from password during instantiation of computer with name %s',
+                         self.computer_name)
             for enc_type in self.encryption_types:
                 raw_key = ad_password_string_to_key(enc_type, self.computer_name,
                                                     self.password, self.domain_dns_name)
@@ -73,6 +77,8 @@ class ADComputer:
                                                        gss_name_type=AD_DEFAULT_NAME_TYPE)
                 self.kerberos_keys.append(user_gss_kerberos_key)
                 self.user_kerberos_keys.append(user_gss_kerberos_key)
+            logger.debug('Generated %s kerberos keys from password during instantiation of computer with name %s',
+                         len(self.kerberos_keys), self.computer_name)
 
     def add_encryption_type_locally(self, encryption_type: ADEncryptionType):
         """ Adds an encryption type to the computer locally. This will generate new kerberos keys
@@ -84,11 +90,15 @@ class ADComputer:
         :param encryption_type: The encryption type to add to the computer.
         """
         if encryption_type in self.encryption_types:
+            logger.debug('No change resulted from adding encryption type %s to computer %s locally as it was already present',
+                         encryption_type, self.computer_name)
             return
         if self.password is None:
             raise Exception('Encryption types can only be added to a computer locally if its '
                             'password is known. Without the password, new kerberos keys cannot '
                             'be generated.')
+        logger.debug('Adding encryption type %s to computer %s locally',
+                     encryption_type, self.computer_name)
         self.encryption_types.append(encryption_type)
         raw_krb_key = ad_password_string_to_key(encryption_type, self.computer_name,
                                                 self.password, self.domain_dns_name)
@@ -112,7 +122,11 @@ class ADComputer:
         :param service_principal_name: The service principal name to add to the computer.
         """
         if service_principal_name in self.service_principal_names:
+            logger.debug('No change resulted from adding service principal name %s as it was already present for computer %s',
+                         service_principal_name, self.computer_name)
             return
+        logger.debug('Adding service principal name %s to computer %s locally',
+                     service_principal_name, self.computer_name)
         self.service_principal_names.append(service_principal_name)
         for raw_krb_key in self.raw_kerberos_keys:
             gss_kerberos_key = GssKerberosKey(service_principal_name, self.realm, raw_krb_key, self.kvno,
@@ -197,6 +211,8 @@ class ADComputer:
         new_raw_kerberos_keys = []
         new_server_kerberos_keys = []
         new_user_kerberos_keys = []
+        logger.debug('Adding new encryption types %s to computer %s locally',
+                     encryption_types, self.computer_name)
         for encryption_type in encryption_types:
             raw_krb_key = ad_password_string_to_key(encryption_type, self.computer_name,
                                                     self.password, self.domain_dns_name)
@@ -215,6 +231,8 @@ class ADComputer:
         self.raw_kerberos_keys = new_raw_kerberos_keys
         self.server_kerberos_keys = new_server_kerberos_keys
         self.user_kerberos_keys = new_user_kerberos_keys
+        logger.debug('Generated %s new kerberos keys for new encryption types %s set on computer %s locally',
+                     len(new_kerberos_keys), encryption_types, self.computer_name)
 
     def set_password_locally(self, password: str):
         """ Sets the password on the AD computer locally. This will regenerate server and user kerberos
@@ -231,6 +249,8 @@ class ADComputer:
         self.raw_kerberos_keys = []
         self.server_kerberos_keys = []
         self.user_kerberos_keys = []
+        logger.debug('Generating new kerberos keys for computer %s based on new password',
+                     self.computer_name)
         for enc_type in self.encryption_types:
             raw_key = ad_password_string_to_key(enc_type, self.computer_name,
                                                 self.password, self.domain_dns_name)
@@ -246,12 +266,16 @@ class ADComputer:
                                                    gss_name_type=AD_DEFAULT_NAME_TYPE)
             self.kerberos_keys.append(user_gss_kerberos_key)
             self.user_kerberos_keys.append(user_gss_kerberos_key)
+        logger.info('Generated %s new kerberos keys for computer %s based on new password and forgot old keys',
+                    len(self.kerberos_keys), self.computer_name)
 
     def set_service_principal_names_locally(self, service_principal_names: List[str]):
         """ Sets the service principal names for the computer, and regenerates new server kerberos keys
         for all of the newly set service principal names.
         :param service_principal_names: A list of string service principal names to set for the computer.
         """
+        logger.debug('Generating new kerberos keys for service principal names %s set on computer %s',
+                     service_principal_names, self.computer_name)
         new_kerberos_keys = []
         for spn in self.service_principal_names:
             for raw_krb_key in self.raw_kerberos_keys:
@@ -260,18 +284,29 @@ class ADComputer:
                 new_kerberos_keys.append(gss_kerberos_key)
         self.service_principal_names = service_principal_names
         self.kerberos_keys = new_kerberos_keys + self.user_kerberos_keys
+        logger.debug('Generated %s new kerberos keys for new service principal names %s set on computer %s locally',
+                     len(new_kerberos_keys), service_principal_names, self.computer_name)
 
     def write_full_keytab_file_for_computer(self, file_path):
+        logger.debug('Writing full key file for computer %s to %s', self.computer_name, file_path)
         data = self.get_full_keytab_file_bytes_for_computer()
         self._write_keytab_data(file_path, data)
+        logger.info('Successfully wrote full key file with %s keys for computer %s to %s',
+                    len(self.kerberos_keys), self.computer_name, file_path)
 
     def write_server_keytab_file_for_computer(self, file_path):
+        logger.debug('Writing server key file for computer %s to %s', self.computer_name, file_path)
         data = self.get_server_keytab_file_bytes_for_computer()
         self._write_keytab_data(file_path, data)
+        logger.info('Successfully wrote server key file with %s keys for computer %s to %s',
+                    len(self.server_kerberos_keys), self.computer_name, file_path)
 
     def write_user_keytab_file_for_computer(self, file_path):
+        logger.debug('Writing user key file for computer %s to %s', self.computer_name, file_path)
         data = self.get_user_keytab_file_bytes_for_computer()
         self._write_keytab_data(file_path, data)
+        logger.info('Successfully wrote user key file with %s keys for computer %s to %s',
+                    len(self.user_kerberos_keys), self.computer_name, file_path)
 
     def _write_keytab_data(self, file_path, data):
         with open(file_path, 'wb') as fp:
@@ -283,4 +318,5 @@ class ADComputer:
         :param password: The string password to set for the computer.
         """
         self.kvno += 1
+        logger.debug('Updated kvno for computer %s from %s to %s', self.computer_name, self.kvno-1, self.kvno)
         self.set_password_locally(password)
