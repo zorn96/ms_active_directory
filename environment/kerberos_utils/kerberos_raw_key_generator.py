@@ -76,7 +76,12 @@ def _get_enc_type_profile(enc_type: ADEncryptionType):
     if enc_type not in AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP:
         raise ValueError('Invalid or unsupported encryption type for kerberos key generation {}'
                          .format(enc_type))
-    return AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP[enc_type]
+    ad_enc_to_profile = {
+        _AES128CTS.enc_type: _AES128CTS,
+        _AES256CTS.enc_type: _AES256CTS,
+        _RC4.enc_type: _RC4
+    }
+    return ad_enc_to_profile[enc_type]
 
 
 def _format_aes_salt_for_ad(computer_name: str, domain: str, realm: str):
@@ -256,21 +261,21 @@ class _AESEnctype(_SimplifiedEnctype):
 
 
 class _AES128CTS(_AESEnctype):
-    enc_type = ADEncryptionType.AES128
+    enc_type = ADEncryptionType.AES128_CTS_HMAC_SHA1_96
     # 16 bytes * 8 bits/byte = 128 bits, AES128
     key_size = 16
     seed_size = 16
 
 
 class _AES256CTS(_AESEnctype):
-    enc_type = ADEncryptionType.AES256
+    enc_type = ADEncryptionType.AES256_CTS_HMAC_SHA1_96
     # 32 bytes * 8 bits/byte = 256 bits, AES256
     key_size = 32
     seed_size = 32
 
 
 class _RC4(_EncTypeProfile):
-    enc_type = ADEncryptionType.RC4
+    enc_type = ADEncryptionType.RC4_HMAC
     key_size = 16
     seed_size = 16
 

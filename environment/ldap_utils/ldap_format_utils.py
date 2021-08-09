@@ -1,5 +1,6 @@
 import logging_utils
 
+from ldap3 import Connection
 from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
 from typing import List
@@ -145,6 +146,47 @@ def normalize_object_location_in_domain(location: str, domain_dns_name: str):
     if not is_dn(location):
         raise NotImplementedError('Windows-style paths are not supported')
     return strip_domain_from_object_location(location, domain_dns_name)
+
+
+def process_ldap3_conn_return_value(ldap_connection: Connection, return_value):
+    """ Thread-safe ldap3 connections return a tuple containing a boolean about success,
+    the result, the response, and the request. Non-thread-safe ldap3 connections just
+    leave the other fields and return a boolean when performing search/add/etc. and
+    leave it up to the caller to manage thread safety.
+
+    This function processes the return value so that it can be used within this class
+    without worrying about the return format.
+    """
+    if ldap_connection.strategy.thread_safe:
+        success, result, response, req = return_value
+    else:
+        success = return_value
+        result = ldap_connection.result
+        response = ldap_connection.response
+        req = ldap_connection.request
+    return success, result, response, req
+
+
+def remove_ad_search_refs(response):
+    """ Many LDAP queries in Active Directory will include a number of generic search references
+    to say 'maybe go look here for completeness'. This is especially common in setups where
+    there's trusted domains or other domains in the same forest.
+
+    But for many domain operations, we don't care about them. For example, when checking for other
+    accounts with a sAMAccountName in a domain, we don't care about the possibility of accounts
+    existing with that name in another domain in the forest because it's a domain-unique
+    attribute.
+    So this is a helper function to remove such references.
+
+    :param response: A list of LDAP search responses.
+    :return: A filtered list, with search references removed.
+    """
+    if not response:
+        return []
+    real_entities = []
+    if response:
+        real_entities = [entry for entry in response if entry.get('dn')]
+    return real_entities
 
 
 def strip_domain_from_object_location(location: str, domain_dns_name: str):

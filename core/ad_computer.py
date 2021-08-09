@@ -1,9 +1,6 @@
 import logging_utils
 
-from typing import TYPE_CHECKING, List
-# allow type hinting without creating a circular import
-if TYPE_CHECKING:
-    from core.ad_domain import ADDomain
+from typing import List
 
 from core.ad_kerberos_keys import (
     GssKerberosKey,
@@ -30,7 +27,7 @@ logger = logging_utils.get_logger()
 
 class ADComputer:
 
-    def __init__(self, samaccount_name: str, domain: ADDomain, location: str=None,
+    def __init__(self, samaccount_name: str, domain, location: str=None,
                  password: str=None, service_principal_names: List[str]=None,
                  encryption_types: List[ADEncryptionType]=None, kvno: int=None):
         self.samaccount_name = samaccount_name

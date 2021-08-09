@@ -1,4 +1,5 @@
 
+TRUSTED_DOMAIN_OBJECT_CLASS = 'TrustedDomain'
 COMPUTER_OBJECT_CLASS = 'computer'
 USER_OBJECT_CLASS = 'user'
 TOP_OBJECT_CLASS = 'top'
@@ -12,17 +13,31 @@ WORKSTATION_TRUST_ACCOUNT = 4096
 DONT_EXPIRE_PASSWORD = 65536
 COMPUTER_ACCESS_CONTROL_VAL = WORKSTATION_TRUST_ACCOUNT + DONT_EXPIRE_PASSWORD
 
-# keys for active directory attributes
+# keys for common active directory attributes
 AD_ATTRIBUTE_SAMACCOUNT_NAME = 'sAMAccountName'
 AD_ATTRIBUTE_COMMON_NAME = 'cn'
+AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
+
+# keys for general user and computer attributes
 AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'
 AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES = 'servicePrincipalName'
+AD_ATTRIBUTE_PASSWORD = 'unicodePwd'
+
+# keys for attributes most only used by computerscomputer-specifc
 AD_ATTRIBUTE_ENCRYPTION_TYPES = 'msDS-SupportedEncryptionTypes'
 AD_ATTRIBUTE_KVNO = 'msDS-KeyVersionNumber'
-AD_ATTRIBUTE_PASSWORD = 'unicodePwd'
 AD_ATTRIBUTE_DNS_HOST_NAME = 'dNSHostName'
 AD_ATTRIBUTE_ADDITIONAL_DNS_HOST_NAME = 'msDS-AdditionalDnsHostName'
-AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
+
+# keys for domains and trusted domains
+AD_DOMAIN_SUPPORTED_SASL_MECHANISMS = 'supportedSASLMechanisms'
+AD_TRUSTED_DOMAIN_NAME = 'trustPartner'  # the netbios name of the trusted domain
+AD_TRUST_TYPE = 'trustType'  # indicates windows or MIT
+AD_TRUST_DIRECTION = 'trustDirection'  # disabled, incoming, outgoing, bidirectional
+# TODO: implement decoding of more detailed trust info
+# https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/e9a2d23c-c31e-4a6f-88a0-6646fdb51a3c
+AD_TRUST_ATTRIBUTES = 'trustAttributes'
+
 
 # From windows AD docs
 AD_USERNAME_RESTRICTED_CHARS = {'[', ']', ':', ';', '|', '=', '+', '*', '?', '<', '>', '/', '\\',

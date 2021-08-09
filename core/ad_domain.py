@@ -28,6 +28,7 @@ from core.ad_session import ADSession
 from environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
 from environment.format_utils import format_computer_name_for_authentication
 from environment.kerberos_utils.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
+from environment.ldap_utils.ldap_format_utils import process_ldap3_conn_return_value
 from environment.security_utils.security_config_constants import ADEncryptionType
 
 
@@ -69,7 +70,11 @@ def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, comp
     # for joining a domain, default to using the local machine's hostname as a computer name
     if computer_name is None:
         computer_name = socket.gethostname()
-        logger.info('Using computer hostname as computer name to join domain: {}'.format(computer_name))
+        # if there's dots (e.g. our computer is server1.com) just take the first piece
+        if '.' in computer_name:
+            computer_name = computer_name.split('.')[0]
+        logger.info('Using computer hostname (or its first component after splitting on dots) as computer name to '
+                    'join domain: {}'.format(computer_name))
     logger.info('Attempting to join computer to domain %s with name %s', ad_session.get_domain_dns_name(),
                 computer_name)
     computer = ad_session.create_computer(computer_name, computer_location=computer_location,
@@ -220,10 +225,11 @@ class ADDomain:
                     raise Exception('Unable to StartTLS on connection to domain. Please check the server(s) to ensure '
                                     'that they have properly configured certificates.')
             logger.debug('Successfully secured connection to AD domain %s', self.domain)
-        bound = conn.bind()
+        bind_resp = conn.bind()
+        bound, result, _, _ = process_ldap3_conn_return_value(conn, bind_resp)
         if not bound:
             raise Exception('Failed to bind connection to {} - please check the credentials and authentication '
-                            'mechanism in use.'.format(conn.server.name))
+                            'mechanism in use. LDAP result: {}'.format(conn.server.name, result))
         logger.debug('Successfully bound connection to AD domain %s to establish session', self.domain)
         session = ADSession(conn, self)
         return session

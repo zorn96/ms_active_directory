@@ -7,10 +7,7 @@ from ldap3 import (
     Connection,
     SUBTREE,
 )
-from typing import List, TYPE_CHECKING
-# allow type hinting without creating a circular import
-if TYPE_CHECKING:
-    from core.ad_domain import ADDomain
+from typing import List
 
 import environment.ldap_utils.ldap_format_utils as ldap_utils
 import environment.ldap_utils.ldap_constants as ldap_constants
@@ -25,7 +22,7 @@ logger = logging_utils.get_logger()
 
 class ADSession:
 
-    def __init__(self, ldap_connection: Connection, domain: ADDomain):
+    def __init__(self, ldap_connection: Connection, domain):
         self.ldap_connection = ldap_connection
         self.domain = domain
         self.domain_dns_name = self.domain.get_domain_dns_name()
@@ -35,13 +32,17 @@ class ADSession:
         """ Returns if the session is currently authenticated """
         return self.ldap_connection.bound
 
+    def is_encrypted(self):
+        """ Returns if the session's connection is encrypted """
+        return self.ldap_connection.tls_started or self.ldap_connection.server.ssl
+
     def is_open(self):
         """ Returns if the session's connection is currently open """
         return not self.ldap_connection.closed
 
-    def is_encrypted(self):
-        """ Returns if the session's connection is encrypted """
-        return self.ldap_connection.tls_started or self.ldap_connection.server.ssl
+    def is_thread_safe(self):
+        """ Returns if the session's connection is thread-safe """
+        return self.ldap_connection.strategy.thread_safe
 
     def get_ldap_connection(self):
         """ Returns the LDAP connection that this session uses for communication.
@@ -75,10 +76,12 @@ class ADSession:
                                                                         self.domain_dns_name)
         search_dn = normalized_rdn + ',' + self.domain_search_base
         # search returns True if it finds anything. we only need to find one object before stopping
-        return self.ldap_connection.search(search_base=search_dn,
-                                           search_filter=ldap_constants.FIND_ANYTHING_FILTER,
-                                           search_scope=BASE,
-                                           size_limit=1)
+        res = self.ldap_connection.search(search_base=search_dn,
+                                          search_filter=ldap_constants.FIND_ANYTHING_FILTER,
+                                          search_scope=BASE,
+                                          size_limit=1)
+        exists, _, _, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        return exists
 
     def object_exists_in_domain_with_attribute(self, attr: str, unescaped_value: str):
         """ Check if any objects exist in the domain with a given attribute. Returns True if so, False otherwise.
@@ -94,22 +97,29 @@ class ADSession:
             logger.debug('Escaped value %s of %s as generic LDAP value to be %s', unescaped_value, attr, value)
         ldap_filter = '({}={})'.format(attr, value)
         # search returns True if it finds anything. we only need to find one object before stopping
-        return self.ldap_connection.search(search_base=self.domain_search_base,
-                                           search_filter=ldap_filter,
-                                           search_scope=SUBTREE,
-                                           size_limit=1)
+        res = self.ldap_connection.search(search_base=self.domain_search_base,
+                                          search_filter=ldap_filter,
+                                          search_scope=SUBTREE,
+                                          attributes=[attr],
+                                          size_limit=1)
+        _, _, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        real_entities = ldap_utils.remove_ad_search_refs(response)
+        return len(real_entities) > 0
 
     def _create_object(self, object_dn: str, object_classes: List[str], account_attr_dict: dict):
         if self.dn_exists_in_domain(object_dn):
             raise Exception('An object already exists within the domain with distinguished name {} - please remove it '
                             'or change the attributes specified such that a different distinguished name is created.'
                             .format(object_dn))
-        success = self.ldap_connection.add(object_dn, object_classes, account_attr_dict)
+        res = self.ldap_connection.add(object_dn, object_classes, account_attr_dict)
+        # TODO: returning the actual response is probably a good idea so we can do something with it.
+        # doing more with it in case of error would be a good idea too
+        success, result, _, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
         if success:
             return success
         # don't include attributes in the exception because a password could be there and it could get logged.
         raise Exception('An exception was encountered creating an object with distinguished name {} and object classes '
-                        '{}. LDAP result: {}'.format(object_dn, object_classes, self.ldap_connection.result))
+                        '{}. LDAP result: {}'.format(object_dn, object_classes, result))
 
     def create_computer(self, computer_name: str, computer_location: str=None, computer_password: str=None,
                         encryption_types: List[security_constants.ADEncryptionType]=None, hostnames: List[str]=None,
