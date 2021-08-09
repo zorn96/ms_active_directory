@@ -29,9 +29,9 @@ from typing import List
 from core.ad_session import ADSession
 from environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
 from environment.format_utils import format_computer_name_for_authentication
-from environment.kerberos_utils.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
-from environment.ldap_utils.ldap_format_utils import process_ldap3_conn_return_value
-from environment.security_utils.security_config_constants import ADEncryptionType
+from environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
+from environment.ldap.ldap_format_utils import process_ldap3_conn_return_value
+from environment.security.security_config_constants import ADEncryptionType
 
 
 logger = logging_utils.get_logger()

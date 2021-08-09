@@ -5,19 +5,19 @@ from typing import List
 from core.ad_kerberos_keys import (
     GssKerberosKey,
 )
-from environment.kerberos_utils.kerberos_constants import (
+from environment.kerberos.kerberos_constants import (
     AD_DEFAULT_NAME_TYPE
 )
-from environment.kerberos_utils.kerberos_keytab_generator import (
+from environment.kerberos.kerberos_keytab_generator import (
     write_gss_kerberos_key_list_to_raw_bytes
 )
-from environment.kerberos_utils.kerberos_raw_key_generator import (
+from environment.kerberos.kerberos_raw_key_generator import (
     ad_password_string_to_key
 )
-from environment.ldap_utils.ldap_format_utils import (
+from environment.ldap.ldap_format_utils import (
     construct_object_distinguished_name
 )
-from environment.security_utils.security_config_constants import (
+from environment.security.security_config_constants import (
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
 )

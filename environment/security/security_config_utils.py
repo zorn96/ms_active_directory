@@ -7,7 +7,7 @@ import logging_utils
 
 from typing import List
 
-from environment.security_utils.security_config_constants import (
+from environment.security.security_config_constants import (
     AD_PASSWORD_CHAR_RANGE,
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,

@@ -12,7 +12,7 @@ from ldap3.utils.dn import (
     parse_dn,
 )
 
-from environment.ldap_utils.ldap_format_utils import is_dn
+from environment.ldap.ldap_format_utils import is_dn
 
 
 logger = logging_utils.get_logger()

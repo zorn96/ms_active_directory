@@ -5,7 +5,7 @@ from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
 from typing import List
 
-from environment.ldap_utils.ldap_constants import (
+from environment.ldap.ldap_constants import (
     AD_USERNAME_RESTRICTED_CHARS,
     SAM_ACCOUNT_NAME_LENGTH,
     LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT,

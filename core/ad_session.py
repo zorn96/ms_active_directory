@@ -9,10 +9,10 @@ from ldap3 import (
 )
 from typing import List
 
-import environment.ldap_utils.ldap_format_utils as ldap_utils
-import environment.ldap_utils.ldap_constants as ldap_constants
-import environment.security_utils.security_config_utils as security_utils
-import environment.security_utils.security_config_constants as security_constants
+import environment.ldap.ldap_format_utils as ldap_utils
+import environment.ldap.ldap_constants as ldap_constants
+import environment.security.security_config_utils as security_utils
+import environment.security.security_config_constants as security_constants
 
 from core.ad_computer import ADComputer
 

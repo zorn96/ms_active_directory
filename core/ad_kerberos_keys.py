@@ -1,14 +1,14 @@
 import logging_utils
 
-from environment.kerberos_utils.kerberos_constants import (
+from environment.kerberos.kerberos_constants import (
     AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP,
     DEFAULT_UNKNOWN_NAME_TYPE,
     KRB5_ENC_TYPE_TO_AD_ENC_TYPE_MAP,
     NAME_TYPE_VALUE_TO_NAME_TYPE_MAP,
     PREFERRED_KEYTAB_FORMAT_VERSION
 )
-from environment.kerberos_utils.kerberos_keytab_generator import write_complete_keytab_structure_to_raw_bytes
-from environment.security_utils.security_config_constants import (
+from environment.kerberos.kerberos_keytab_generator import write_complete_keytab_structure_to_raw_bytes
+from environment.security.security_config_constants import (
     ADEncryptionType
 )
 

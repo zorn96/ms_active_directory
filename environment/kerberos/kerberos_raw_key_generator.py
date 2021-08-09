@@ -16,13 +16,13 @@ from Crypto.Protocol.KDF import PBKDF2  # password-based key derivation function
 
 from core.ad_kerberos_keys import RawKerberosKey
 
-from environment.kerberos_utils.kerberos_constants import (
+from environment.kerberos.kerberos_constants import (
     AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP,
     AES_CIPHER_BLOCK_SIZE_BYTES,
     AES_ITERATIONS_FOR_AD,
     SALT_FORMAT_FOR_AD,
 )
-from environment.security_utils.security_config_constants import (
+from environment.security.security_config_constants import (
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
 )

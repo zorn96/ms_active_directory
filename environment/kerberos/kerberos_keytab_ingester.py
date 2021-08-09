@@ -6,13 +6,13 @@ import logging_utils
 
 from core.ad_kerberos_keys import GssKerberosKey, RawKerberosKey
 # constants for structuring in-memory keytab representations
-from environment.kerberos_utils.kerberos_constants import (
+from environment.kerberos.kerberos_constants import (
     KEYTAB_FORMAT_VERSION_FOR_KEYTAB_FORMAT_VERSION,
     KRB5_ENC_TYPE_VALUE_TO_ENC_TYPE_MAP,
 )
 
 # constants for parsing keytab data, as a separate import for improved readability
-from environment.kerberos_utils.kerberos_constants import (
+from environment.kerberos.kerberos_constants import (
     ENCRYPTION_TYPE_FIELD_SIZE,
     ENTRY_LENGTH_FIELD_SIZE_BYTES,
     FLAGS_FIELD_SIZE_BYTES,

@@ -1,5 +1,5 @@
 """ Constants for use in kerberos key generation and ingestion """
-from environment.security_utils.security_config_constants import ADEncryptionType
+from environment.security.security_config_constants import ADEncryptionType
 
 # constants needed to ingest keytabs and also write them out to files
 # See these pages for more info on the evolution of the format beyond code comments

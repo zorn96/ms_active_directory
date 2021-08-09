@@ -12,7 +12,7 @@ import logging_utils
 from typing import List
 
 
-from environment.kerberos_utils.kerberos_constants import (
+from environment.kerberos.kerberos_constants import (
     DEFAULT_UNKNOWN_NAME_TYPE,
     ENCRYPTION_TYPE_FIELD_SIZE,
     ENTRY_LENGTH_FIELD_SIZE_BYTES,
