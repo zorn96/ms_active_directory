@@ -29,13 +29,17 @@ from environment.discovery.discovery_constants import (
 logger = logging_utils.get_logger()
 
 
-def discover_ldap_domain_controllers_in_domain(domain: str, site: str=None, server_limit: int=None, secure: bool=True):
+def discover_ldap_domain_controllers_in_domain(domain: str, site: str=None, dns_nameservers: List[str]=None,
+                                               source_ip: str=None, server_limit: int=None, secure: bool=True):
     """ Take in an AD domain and discover the LDAP servers in the domain that are domain
     controllers. Then order them to try and optimize going to the closest/fastest/highest priority
     servers first.
     :param domain: The string dns name of the domain.
     :param site: The string name of a site within the domain. If specified, only controllers within
                  the site will be returned.
+    :param dns_nameservers: The nameservers to use for DNS lookups to discover LDAP servers. If not
+                            specified, the system DNS nameservers will be used.
+    :param source_ip: The source IP to use for DNS queries and when checking RTT to LDAP servers.
     :param server_limit: An integer limit on the number of controllers returned. After sorting by RTT,
                          if specified, only the fastest server_limit controllers will be returned.
     :param secure: If true, only controllers capable of securing LDAP communication using StartTLS
@@ -47,16 +51,20 @@ def discover_ldap_domain_controllers_in_domain(domain: str, site: str=None, serv
     ldap_srv = LDAP_DNS_SRV_FORMAT.format(domain=domain)
     if site:
         ldap_srv = LDAP_SITE_AWARE_DNS_SRV_FORMAT.format(site=site, domain=domain)
-    all_ldap_records = _resolve_record_in_dns(ldap_srv, SRV)
-    return _order_ldap_servers_by_rtt(all_ldap_records, server_limit, secure)
+    all_ldap_records = _resolve_record_in_dns(ldap_srv, SRV, dns_nameservers, source_ip)
+    return _order_ldap_servers_by_rtt(all_ldap_records, server_limit, source_ip, secure)
 
 
-def discover_kdc_domain_controllers_in_domain(domain: str, site: str=None, server_limit: int=None):
+def discover_kdc_domain_controllers_in_domain(domain: str, site: str=None, dns_nameservers: List[str]=None,
+                                              source_ip: str=None, server_limit: int=None):
     """ Take in an AD domain and discover the KDCs in the domain that are domain controllers. Then
     order them to try and optimize going to the closest/fastest/highest priority servers first.
     :param domain: The string dns name of the domain.
     :param site: The string name of a site within the domain. If specified, only controllers within
                  the site will be returned.
+    :param dns_nameservers: The nameservers to use for DNS lookups to discover LDAP servers. If not
+                            specified, the system DNS nameservers will be used.
+    :param source_ip: The source IP to use for DNS queries and when checking RTT to kerberos servers.
     :param server_limit: An integer limit on the number of controllers returned. After sorting by RTT,
                          if specified, only the fastest server_limit controllers will be returned.
     :returns: a tuple consisting of a truncated list of the ordered list of KDC uris (which combines the hostname
@@ -67,11 +75,11 @@ def discover_kdc_domain_controllers_in_domain(domain: str, site: str=None, serve
     krb_srv = KERBEROS_DNS_SRV_FORMAT.format(domain=domain)
     if site:
         krb_srv = KERBEROS_SITE_AWARE_DNS_SRV_FORMAT.format(site=site, domain=domain)
-    all_ldap_records = _resolve_record_in_dns(krb_srv, SRV)
-    return _order_kdcs_by_rtt(all_ldap_records, server_limit)
+    all_ldap_records = _resolve_record_in_dns(krb_srv, SRV, dns_nameservers, source_ip)
+    return _order_kdcs_by_rtt(all_ldap_records, server_limit, source_ip)
 
 
-def _resolve_record_in_dns(record_name: str, record_type: RdataType):
+def _resolve_record_in_dns(record_name: str, record_type: RdataType, dns_nameservers: List[str], source_ip: str):
     """ Take a record and record type and resolve it in DNS.
 
     Returns a list of tuples where each tuple is in the format (host, port, priority, weight)
@@ -80,13 +88,19 @@ def _resolve_record_in_dns(record_name: str, record_type: RdataType):
     temp_resolver = dns.resolver.Resolver()
     temp_resolver.timeout = DNS_TIMEOUT_SECONDS
     temp_resolver.lifetime = DNS_TIMEOUT_SECONDS
+    if dns_nameservers:
+        logger.debug('Using the following nameservers for dns lookup instead of the default system ones %s',
+                     dns_nameservers)
+        temp_resolver.nameservers = dns_nameservers
     # DNS queries are normally UDP. However, the best practices from microsoft for DNS are that
     # you use TCP if your result will be greater than 512 bytes. It states that DNS may truncate
     # results greater than 512 bytes.
     # If a record maps to a lot of results (like a service record for a large domain) then our
-    # result can easily exceed 512 bytes, so we use tcp for lookups here.
+    # result can easily exceed 512 bytes, so we use tcp directly for lookups here, rather than
+    # wait for udp to fail and then fallback.
     try:
-        resolved_records = temp_resolver.resolve(record_name, record_type, tcp=True)
+        resolved_records = temp_resolver.resolve(record_name, record_type, tcp=True,
+                                                 source=source_ip)
     except dns.exception.DNSException as dns_ex:
         logger.info('Unable to query DNS for record %s due to: %s', record_name, dns_ex)
         return []
@@ -109,7 +123,7 @@ def _resolve_record_in_dns(record_name: str, record_type: RdataType):
     return record_tuples
 
 
-def _order_ldap_servers_by_rtt(ldap_server_records: List[tuple], server_limit: int, secure: bool):
+def _order_ldap_servers_by_rtt(ldap_server_records: List[tuple], server_limit: int, source_ip: str, secure: bool):
     """ Take in a list of LDAP server records and determine the reachability and round trip time to each.
     Order them by RTT, fastest first, and drop unreachable servers. If there's more than our limit,
     trim the length based on our limit.
@@ -118,12 +132,12 @@ def _order_ldap_servers_by_rtt(ldap_server_records: List[tuple], server_limit: i
     for server_tuple in ldap_server_records:
         # we don't care about weight and priority anymore if ordering by RTT
         server_host, server_port, _, _ = server_tuple
-        fn = lambda: _check_ldap_server_availability_and_rtt(server_host, server_port, secure)
+        fn = lambda: _check_ldap_server_availability_and_rtt(server_host, server_port, source_ip, secure)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'LDAP', server_limit)
 
 
-def _order_kdcs_by_rtt(kdc_server_records: List[tuple], server_limit: int):
+def _order_kdcs_by_rtt(kdc_server_records: List[tuple], server_limit: int, source_ip: str):
     """ Take in a list of KDC server records and determine the reachability and round trip time to each.
     Order them by RTT, fastest first, and drop unreachable servers. If there's more than our limit,
     trim the length based on our limit.
@@ -132,7 +146,7 @@ def _order_kdcs_by_rtt(kdc_server_records: List[tuple], server_limit: int):
     for server_tuple in kdc_server_records:
         # we don't care about weight and priority anymore if ordering by RTT
         server_host, server_port, _, _ = server_tuple
-        fn = lambda: _check_kdc_availability_and_rtt(server_host, server_port)
+        fn = lambda: _check_kdc_availability_and_rtt(server_host, source_ip, server_port)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'KDC', server_limit)
 
@@ -155,7 +169,7 @@ def _process_sort_return_rtt_ordering_results(lookup_rtt_fns: List[Callable], ur
             rtt_results.append(task.result())
     # Drop results that are None values, as they indicate unreachable servers.
     rtt_uri_tuples = [result_tuple for result_tuple in rtt_results
-                      if result_tuple[0] is not None]
+                      if result_tuple is not None and result_tuple[0] is not None]
     # this will sort ascending by the first key by default, which is the round trip time. so it
     # will end up sorting the closest servers first
     rtt_uri_tuples = sorted(rtt_uri_tuples)
@@ -171,7 +185,7 @@ def _process_sort_return_rtt_ordering_results(lookup_rtt_fns: List[Callable], ur
     return short_list
 
 
-def _check_ldap_server_availability_and_rtt(server_host: str, server_port: str, secure: bool):
+def _check_ldap_server_availability_and_rtt(server_host: str, server_port: str, source_ip: str, secure: bool):
     """ Even if an LDAP server is registered in DNS, it might not be reachable for us. DNS is
     centralized, but data centers may have multiple network partitions, and there may be firewalls
     or air gaps in our way (we've seen this at customer sites).
@@ -192,7 +206,7 @@ def _check_ldap_server_availability_and_rtt(server_host: str, server_port: str, 
     # by using get_info=DSA we perform what's sometimes referred to as form of "LDAP ping".
     # we query the root DSE, which can be done without binding
     server = Server(ldap_uri, get_info=DSA)
-    conn = Connection(server)
+    conn = Connection(server, source_address=source_ip)
     start = time.time()
     try:
         conn.open()
@@ -211,7 +225,7 @@ def _check_ldap_server_availability_and_rtt(server_host: str, server_port: str, 
     return end - start, ldap_uri
 
 
-def _check_kdc_availability_and_rtt(server_host: str, server_port: str):
+def _check_kdc_availability_and_rtt(server_host: str, server_port: str, source_ip: str):
     """ Even if an KDC server is registered in DNS, it might not be reachable for us. DNS is
     centralized, but data centers may have multiple network partitions, and there may be firewalls
     or air gaps in our way (we've seen this at customer sites).
@@ -226,6 +240,7 @@ def _check_kdc_availability_and_rtt(server_host: str, server_port: str):
     Returns None if the server is unreachable.
     """
     candidates = []
+    source_ip = source_ip if source_ip else ''  # socket library wants an empty string for dynamic assignment
     # hostname - try both ipv4 and ipv6
     kdc_uri = format_utils.format_hostname_or_ip_and_port_to_uri(server_host, server_port,
                                                                  is_ipv6_fmt=False)
@@ -242,6 +257,9 @@ def _check_kdc_availability_and_rtt(server_host: str, server_port: str):
     for temp_socket, temp_addr_tuple in candidates:
         try:
             try:
+                # bind before time evaluation so that the underlying network stack isn't factored in,
+                # since dynamic port assignment time varies
+                temp_socket.bind((source_ip, 0))  # 0 for dynamically assigned port
                 start = time.time()
                 temp_socket.connect(temp_addr_tuple)
                 end = time.time()

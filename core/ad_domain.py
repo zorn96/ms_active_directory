@@ -20,6 +20,8 @@ from ssl import (
     OP_NO_SSLv3,
     OP_NO_TLSv1,
     OP_NO_TLSv1_1,
+    CERT_NONE,
+    CERT_REQUIRED,
 )
 from typing import List
 
@@ -93,20 +95,56 @@ class ADDomain:
 
     def __init__(self, domain: str, site: str = None,
                  ldap_servers_or_uris: List = None,
-                 kerberos_uris: List = None,
+                 kerberos_uris: List[str] = None,
                  encrypt_connections: bool = True,
                  ca_certificates_file_path: str = None,
                  discover_ldap_servers: bool = True,
-                 discover_kerberos_servers: bool = True):
+                 discover_kerberos_servers: bool = True,
+                 dns_nameservers: List[str] = None,
+                 source_ip: str = None):
         """ Initialize an interface for defining an AD domain and interacting with it.
-        :param domain: The
-        :param site:
-        :param ldap_servers_or_uris:
-        :param kerberos_uris:
-        :param encrypt_connections:
-        :param ca_certificates_file_path:
-        :param discover_ldap_servers:
-        :param discover_kerberos_servers:
+        :param domain: The DNS name of the Active Directory domain that this object represents.
+        :param site: The Active Directory site to operate within. This is only relevant if LDAP or
+                     kerberos servers are discovered in DNS, as there's site-specific records.
+                     If set, only hosts within the specified site will be used.
+        :param ldap_servers_or_uris: A list of either Server objects from the ldap3 library, or
+                                     string LDAP uris. If specified, they will be used to establish
+                                     sessions with the domain.
+        :param kerberos_uris: A list of string kerberos server uris. These can be IPs (and the default
+                              kerberos port of 88 will be used) or IP:port combinations.
+        :param encrypt_connections: Whether or not LDAP connections with the domain will be secured
+                                    using TLS. This must be True for join functionality to work,
+                                    as passwords can only be set over secure connections.
+                                    If not specified, defaults to True. If LDAP server objects are
+                                    provided with ssl enabled or ldaps:// uris are provided, then
+                                    connections to those servers will be encrypted because of the
+                                    inherent behavior of such configurations.
+        :param ca_certificates_file_path: A path to CA certificates to be used to establish trust
+                                          with LDAP servers when securing connections. If not
+                                          specified, then TLS will not check the peer certificate.
+                                          If LDAP server objects are specified, then their TLS
+                                          settings will be used rather than anything set in this
+                                          variable. It is only used when discovering servers or
+                                          using string URIs, so Server objects can be used if
+                                          different CAs sign different servers' certificates
+                                          due to regional CAs or something similar.
+                                          If not specified, defaults to None.
+        :param discover_ldap_servers: If true, and LDAP servers/uris are not specified, then LDAP
+                                      servers for the domain will be discovered in DNS.
+                                      If not specified, defaults to True.
+        :param discover_kerberos_servers: If true, and kerberos uris are not specified, then kerberos
+                                          servers for the domain will be discovered in DNS.
+                                          If not specified, defaults to True.
+        :param dns_nameservers: A list of strings indicating the IP addresses of DNS servers to use
+                                when discovering servers for the domain. These may be IPv4 or IPv6
+                                addresses.
+                                If not specified, defaults to what's configured in /etc/resolv.conf on
+                                POSIX systems, and extracting nameservers from registry keys on windows.
+                                Defaults to None.
+        :param source_ip: A source IP address to use for both DNS and LDAP connections established for
+                          this domain. If not specified, defaults to automatic assignment of IP using
+                          underlying system networking.
+                          Defaults to None.
         """
         self.domain = domain.lower()  # cast to lowercase
         self.site = site.lower() if site else None
@@ -115,13 +153,19 @@ class ADDomain:
         self.ldap_servers = []
         self.ldap_uris = []
         self.kerberos_uris = []
+        self.dns_nameservers = dns_nameservers
+        self.source_ip = source_ip
         # discover ldap servers and kerberos servers if we weren't provided any and weren't told not to
         if not ldap_servers_or_uris and discover_ldap_servers:
             ldap_servers_or_uris = discover_ldap_domain_controllers_in_domain(self.domain, site=self.site,
+                                                                              dns_nameservers=self.dns_nameservers,
+                                                                              source_ip=self.source_ip,
                                                                               secure=self.encrypt_connections)
         # discover kerberos servers if we weren't provided any and weren't told not to
         if not kerberos_uris and discover_kerberos_servers:
-            kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain, site=self.site)
+            kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain, site=self.site,
+                                                                      dns_nameservers=self.dns_nameservers,
+                                                                      source_ip=self.source_ip)
 
         # handle the fact that user-provided ldap servers could be servers or strings
         if ldap_servers_or_uris:
@@ -156,9 +200,12 @@ class ADDomain:
                 # 1.2 by default
                 tls_setting = None
                 if self.encrypt_connections:
+                    # only check peer certs if we have CAs
+                    checking = CERT_REQUIRED if self.ca_certificates_file_path else CERT_NONE
                     tls_setting = Tls(ca_certs_file=self.ca_certificates_file_path,
                                       ssl_options=[OP_NO_SSLv2, OP_NO_SSLv3, OP_NO_TLSv1,
-                                                   OP_NO_TLSv1_1])
+                                                   OP_NO_TLSv1_1],
+                                      validate=checking)
                 ldap_server_objs.append(Server(serv, tls=tls_setting))
                 ldap_uris.append(serv)
             elif isinstance(serv, Server):
@@ -210,10 +257,10 @@ class ADDomain:
         # Use safe restartable in case the caller uses this in a multi-threaded application.
         if not kwargs.get('client_strategy'):
             conn = Connection(server_pool, user=user, password=password, authentication=authentication_mechanism,
-                              client_strategy=SAFE_RESTARTABLE, **kwargs)
+                              client_strategy=SAFE_RESTARTABLE, source_address=self.source_ip, **kwargs)
         else:
             conn = Connection(server_pool, user=user, password=password, authentication=authentication_mechanism,
-                              **kwargs)
+                              source_address=self.source_ip, **kwargs)
 
         conn.open()
         logger.debug('Opened connection to AD domain %s: %s', self.domain, conn)
@@ -282,4 +329,3 @@ class ADDomain:
                                             supports_legacy_behavior=supports_legacy_behavior,
                                             computer_key_file_path=computer_key_file_path,
                                             **additional_account_attributes)
-
