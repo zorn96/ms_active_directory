@@ -30,7 +30,9 @@ AD_ATTRIBUTE_DNS_HOST_NAME = 'dNSHostName'
 AD_ATTRIBUTE_ADDITIONAL_DNS_HOST_NAME = 'msDS-AdditionalDnsHostName'
 
 # keys for domains and trusted domains
+AD_DOMAIN_FUNCTIONAL_LEVEL = 'domainFunctionality'
 AD_DOMAIN_SUPPORTED_SASL_MECHANISMS = 'supportedSASLMechanisms'
+AD_DOMAIN_TIME = 'currentTime'
 AD_TRUSTED_DOMAIN_NAME = 'trustPartner'  # the netbios name of the trusted domain
 AD_TRUST_TYPE = 'trustType'  # indicates windows or MIT
 AD_TRUST_DIRECTION = 'trustDirection'  # disabled, incoming, outgoing, bidirectional

@@ -12,8 +12,8 @@ class ADEncryptionType(Enum):
     AES256_CTS_HMAC_SHA1_96 = 16
 
     @classmethod
-    def get_ad_encryption_type_for_value(cls):
-        pass
+    def get_ad_encryption_type_for_value(cls, val):
+        return ENCRYPTION_TYPE_VALUE_TO_ENUM.get(val)
 
 
 # encryption types as stored in AD are just a number that represents a bitstring.

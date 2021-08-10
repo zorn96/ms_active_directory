@@ -258,6 +258,60 @@ class ADSession:
     def create_group(self):
         raise NotImplementedError()
 
+    def is_domain_close_in_time_to_localhost(self, allowed_drift_seconds=None):
+        """ Get whether the domain time is close to the current local time.
+        Just calls the parent domain function and returns that. This is included here for completeness.
+        """
+        return self.domain.is_close_in_time_to_localhost(self.ldap_connection, allowed_drift_seconds)
+
+    def find_certificate_authorities_for_domain(self):
+        """ Attempt to discover the CAs within the domain and return info on their certificates.
+        If a session was first established using an IP address or blind trust TLS, but we want to bootstrap our
+        sessions to establish stronger trust, or write the CA certificates to a local truststore for other
+        non-LDAP applications to use (e.g. establishing roots of trust for https or syslog over TLS), then it's
+        helpful to grab the certificate authorities in the domain and their signing certificates.
+        Not all domains run certificate authorities; some use public CAs or get certs from other PKI being run,
+        so this isn't useful for everyone. But a lot of people do run CAs in their AD domains, and this is useful
+        for them.
+        """
+        pass
+
+    def find_current_time_for_domain(self):
+        """ Get the current time for the domain as a datetime object.
+        Just calls the parent domain function and returns that. This is included here for completeness.
+        """
+        return self.domain.find_current_time(self.ldap_connection)
+
+    def find_dns_servers_for_domain(self):
+        """ Attempt to discover the DNS servers within the domain and return info on them.
+        If a session was first established using an IP address or blind trust TLS, but we want to bootstrap our
+        sessions to use kerberos or TLS backed by CA certificates, we need proper DNS configured. For private
+        domains (e.g. in a datacenter), we may run DNS servers within the domain. This function discovers
+        computers with a "DNS/" service principal name, tries to look up IP addresses for them, and then
+        returns that information.
+        This won't always be useful, as DNS isn't always part of the AD domain, but it can help if we're bootstrapping
+        a computer with manufacturer configurations to use the AD domain for everything based on a minimal starting
+        configuration.
+        """
+        pass
+
+    def find_supported_sasl_mechanisms_for_domain(self):
+        """ Attempt to discover the SASL mechanisms supported by the domain and return them.
+        This just builds upon the functionality that the domain has for this, as you don't need
+        to be authenticated as anything other than anonymous to read this information (since it's
+        often used to figure out how to authenticate).
+        This is included in the session object for completeness.
+        """
+        return self.domain.find_supported_sasl_mechanisms(self.ldap_connection)
+
+    def find_functional_level_for_domain(self):
+        """ Attempt to discover the functional level of the domain and return it.
+        This will indicate if the domain is operating at the level of a 2008, 2012R2, 2016, etc. domain.
+        The functional level of a domain influences what functionality exists (e.g. 2003 cannot issue AES keys,
+        2012 cannot use many TLS ciphers introduced with TLS1.3) and so it can be
+        """
+        return self.domain.find_functional_level(self.ldap_connection)
+
     def find_group(self):
         raise NotImplementedError()
 

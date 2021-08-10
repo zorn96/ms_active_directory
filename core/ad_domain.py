@@ -1,9 +1,12 @@
 import copy
+import pytz
 import socket
 
 import logging_utils
 
+from datetime import datetime, timedelta, timezone
 from ldap3 import (
+    BASE,
     Connection,
     FIRST,
     KERBEROS,
@@ -27,9 +30,16 @@ from typing import List
 
 # local imports come after imports from other libraries
 from core.ad_session import ADSession
+from environment.constants import ADFunctionalLevel
 from environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
 from environment.format_utils import format_computer_name_for_authentication
 from environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
+from environment.ldap.ldap_constants import (
+    AD_DOMAIN_FUNCTIONAL_LEVEL,
+    AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
+    AD_DOMAIN_TIME,
+    FIND_ANYTHING_FILTER,
+)
 from environment.ldap.ldap_format_utils import process_ldap3_conn_return_value
 from environment.security.security_config_constants import ADEncryptionType
 
@@ -226,6 +236,94 @@ class ADDomain:
                                 'elements must be strings'.format(type(serv)))
         self.kerberos_uris = kerberos_uris
 
+    def is_close_in_time_to_localhost(self, ldap_connection: Connection=None, allowed_drift_seconds: int=300):
+        """ Check if we're close in time to the domain.
+        This is primarily useful for kerberos and TLS negotiation health.
+        Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
+        connection will be created and used.
+        :param ldap_connection: An ldap3 connection to the domain, optional.
+        :param allowed_drift_seconds: The number of seconds considered "close", defaults to 5 minutes.
+                                      5 minutes is the standard allowable drift for kerberos.
+        :return: A boolean indicating whether we're within allowed_drift_seconds seconds of the domain time.
+        """
+        domain_time = self.find_current_time(ldap_connection)
+        local_time = datetime.now(tz=timezone.utc)
+        diff = domain_time - local_time
+        if local_time > domain_time:
+            diff = local_time - domain_time
+        return diff < timedelta(seconds=allowed_drift_seconds)
+
+    def find_current_time(self, ldap_connection: Connection=None):
+        """ Find the current time for this domain. This is useful for detecting drift that can cause
+        Kerberos and TLS issues.
+        Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
+        connection will be created and used.
+        :param ldap_connection: An ldap3 connection to the domain, optional.
+        :return: A datetime object representing the time.
+        """
+        if ldap_connection is None:
+            logger.info('Creating a new anonymous connection to read domain supported SASL mechanisms')
+            # we just need an anonymous session to read this information
+            ldap_connection = self.create_session_as_user().get_ldap_connection()
+
+        res = ldap_connection.search(search_base='', search_filter=FIND_ANYTHING_FILTER,
+                                     search_scope=BASE, attributes=[AD_DOMAIN_TIME],
+                                     size_limit=1)
+        success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        if not success:
+            raise Exception('Failed to communicate with the domain to query the current time.')
+        base_attrs = response[0]['attributes']
+        # time comes back as a 1-item list in the format ["20210809080919.0Z"]
+        # that's a date string yyyyMMddHHmmss.0Z
+        ad_time = base_attrs.get(AD_DOMAIN_TIME)[0]
+        useful_time = datetime.strptime(ad_time, '%Y%m%d%H%M%S.0Z')
+        return pytz.utc.localize(useful_time)
+
+    def find_functional_level(self, ldap_connection: Connection=None):
+        """ Find the functional level for this domain.
+        Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
+        connection will be created and used.
+        :param ldap_connection: An ldap3 connection to the domain, optional.
+        :return: An ADVersion enum indicating the functional level.
+        """
+        if ldap_connection is None:
+            logger.info('Creating a new anonymous connection to read domain supported SASL mechanisms')
+            # we just need an anonymous session to read this information
+            ldap_connection = self.create_session_as_user().get_ldap_connection()
+
+        res = ldap_connection.search(search_base='', search_filter=FIND_ANYTHING_FILTER,
+                                     search_scope=BASE, attributes=[AD_DOMAIN_FUNCTIONAL_LEVEL],
+                                     size_limit=1)
+        success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        if not success:
+            raise Exception('Failed to communicate with the domain to query supported SASL mechanisms.')
+        base_attrs = response[0]['attributes']
+        # this is a single-item list of a string of the level number, like ["7"]
+        level_str = base_attrs.get(AD_DOMAIN_FUNCTIONAL_LEVEL)[0]
+        return ADFunctionalLevel.get_functional_level_from_value(int(level_str))
+
+    def find_supported_sasl_mechanisms(self, ldap_connection: Connection=None):
+        """ Find the supported SASL mechanisms for this domain.
+        Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
+        connection will be created and used.
+        :param ldap_connection: An ldap3 connection to the domain, optional.
+        :return: A list of strings indicating the supported SASL mechanisms for the domain.
+                 ex: ['GSSAPI', 'GSS-SPNEGO', 'EXTERNAL']
+        """
+        if ldap_connection is None:
+            logger.info('Creating a new anonymous connection to read domain supported SASL mechanisms')
+            # we just need an anonymous session to read this information
+            ldap_connection = self.create_session_as_user().get_ldap_connection()
+
+        res = ldap_connection.search(search_base='', search_filter=FIND_ANYTHING_FILTER,
+                                     search_scope=BASE, attributes=[AD_DOMAIN_SUPPORTED_SASL_MECHANISMS],
+                                     size_limit=1)
+        success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        if not success:
+            raise Exception('Failed to communicate with the domain to query supported SASL mechanisms.')
+        base_attrs = response[0]['attributes']
+        return base_attrs.get(AD_DOMAIN_SUPPORTED_SASL_MECHANISMS, [])
+
     def refresh_ldap_server_discovery(self):
         """ Re-discover LDAP servers in DNS for the domain and redo the sorting by RTT.
         This can update our list of LDAP servers for future connections, allowing faster servers to be
@@ -246,6 +344,10 @@ class ADDomain:
         self.set_kerberos_uris(kerberos_uris)
 
     def _create_session(self, user, password, authentication_mechanism, **kwargs):
+        """ Internal helper for creating sessions regardless of whether they're for users or computers """
+        if len(self.ldap_servers) == 0:
+            raise Exception('Cannot create a session with the AD domain, as there are no LDAP servers '
+                            'known for the domain.')
         # our servers were either user specified (in which case it's a list of ordered preferences) or
         # were discovered automatically (in which case they're ordered by RTT), so use the FIRST strategy
         # to either contact the first preferred server or the fastest/closest server
@@ -281,15 +383,15 @@ class ADDomain:
         session = ADSession(conn, self)
         return session
 
-    def create_session_for_user(self, user: str=None, password: str=None, authentication_mechanism: str=None,
-                                **kwargs):
+    def create_session_as_user(self, user: str=None, password: str=None, authentication_mechanism: str=None,
+                               **kwargs):
         """ Create a session with AD domain authenticated as the specified user. """
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and user %s',
                     self.domain, authentication_mechanism, user)
         return self._create_session(user, password, authentication_mechanism, **kwargs)
 
-    def create_session_for_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
-                                    authentication_mechanism: str=KERBEROS, **kwargs):
+    def create_session_as_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
+                                   authentication_mechanism: str=KERBEROS, **kwargs):
         """ Create a session with AD domain authenticated as the specified computer. """
         # reject simple binds because computers can't use them for authentication
         if authentication_mechanism == SIMPLE:
@@ -321,7 +423,7 @@ class ADDomain:
         with strong security settings. The account's attributes follow AD naming conventions based on the computer's
         hostname by default.
         """
-        ad_session = self.create_session_for_user(admin_username, admin_password, authentication_mechanism)
+        ad_session = self.create_session_as_user(admin_username, admin_password, authentication_mechanism)
         return join_ad_domain_using_session(ad_session, computer_name=computer_name, computer_location=computer_location,
                                             computer_password=computer_password, computer_hostnames=computer_hostnames,
                                             computer_services=computer_services,
