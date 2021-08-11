@@ -6,8 +6,10 @@ class ADVersion(enum.Enum):
     """ This enum maps AD version friendly names to schema versions """
     WINDOWS_UNRECOGNIZED = None
     WINDOWS_2000 = 13
-    WINDOWS_2003 = 30
-    WINDOWS_2003R2 = 31
+    # Active Directory application mode shares a schema with 2003
+    WINDOWS_2003_OR_ADAM = 30
+    # Active Directory lightweight directory services shares a schema with 2003R2
+    WINDOWS_2003R2_OR_AD_LDS = 31
     WINDOWS_2008 = 44
     WINDOWS_2008R2 = 47
     WINDOWS_2012 = 56

@@ -42,6 +42,7 @@ AD_ATTRIBUTE_CA_CERT = 'caCertificate'
 AD_DOMAIN_FUNCTIONAL_LEVEL = 'domainFunctionality'
 AD_DOMAIN_SUPPORTED_SASL_MECHANISMS = 'supportedSASLMechanisms'
 AD_DOMAIN_TIME = 'currentTime'
+AD_SCHEMA_VERSION = 'objectVersion'
 AD_TRUSTED_DOMAIN_NAME = 'trustPartner'  # the netbios name of the trusted domain
 AD_TRUST_TYPE = 'trustType'  # indicates windows or MIT
 AD_TRUST_DIRECTION = 'trustDirection'  # disabled, incoming, outgoing, bidirectional
@@ -65,6 +66,7 @@ LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT = 16
 DEFAULT_COMPUTER_SERVICES = ['HOST']
 DEFAULT_COMPUTER_LOCATION = 'CN=Computers'
 DNS_SERVICE_FILTER = 'DNS/*'
+DOMAIN_CONTROLLER_SCHEMA_VERSION_SEARCH_CONTAINER = 'CN=schema,CN=Configuration'
 DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
 
 # when checking if something simply exists, or getting everything at a level/subtree,

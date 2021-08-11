@@ -11,6 +11,7 @@ from ldap3 import (
 )
 from typing import List
 
+import environment.constants as constants
 import environment.ldap.ldap_format_utils as ldap_utils
 import environment.ldap.ldap_constants as ldap_constants
 import environment.security.security_config_utils as security_utils
@@ -353,6 +354,35 @@ class ADSession:
             dns_results[hostname] = ip_addr
         return dns_results
 
+    def find_forest_schema_version(self):
+        """ Attempt to determine the version of Windows Server set in the forest's schema.
+        returns: An Enum of type ADVersion indicating the schema version.
+        """
+        search_loc = '{},{}'.format(ldap_constants.DOMAIN_CONTROLLER_SCHEMA_VERSION_SEARCH_CONTAINER,
+                                    self.domain_search_base)
+        res = self.ldap_connection.search(search_base=search_loc, search_filter=ldap_constants.FIND_ANYTHING_FILTER,
+                                          search_scope=BASE, attributes=[ldap_constants.AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS])
+        success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        if not success:
+            raise Exception('Failed to query domain for schema.')
+        entities = ldap_utils.remove_ad_search_refs(entities)
+        if len(entities) == 0:
+            raise Exception('Did not find schema when querying domain.')
+        schema = entities[0]
+        ad_schema_ver = schema['attributes'][ldap_constants.AD_SCHEMA_VERSION]
+        print(ad_schema_ver)
+        return constants.ADVersion.get_version_from_schema_number(ad_schema_ver)
+
+    def find_functional_level_for_domain(self):
+        """ Attempt to discover the functional level of the domain and return it.
+        This will indicate if the domain is operating at the level of a 2008, 2012R2, 2016, etc. domain.
+        The functional level of a domain influences what functionality exists (e.g. 2003 cannot issue AES keys,
+        2012 cannot use many TLS ciphers introduced with TLS1.3) and so it can be useful for determining what
+        to do.
+        :returns: An Enum of type ADFunctionalLevel indicating the functional level.
+        """
+        return self.domain.find_functional_level(self.ldap_connection)
+
     def find_supported_sasl_mechanisms_for_domain(self):
         """ Attempt to discover the SASL mechanisms supported by the domain and return them.
         This just builds upon the functionality that the domain has for this, as you don't need
@@ -361,14 +391,6 @@ class ADSession:
         This is included in the session object for completeness.
         """
         return self.domain.find_supported_sasl_mechanisms(self.ldap_connection)
-
-    def find_functional_level_for_domain(self):
-        """ Attempt to discover the functional level of the domain and return it.
-        This will indicate if the domain is operating at the level of a 2008, 2012R2, 2016, etc. domain.
-        The functional level of a domain influences what functionality exists (e.g. 2003 cannot issue AES keys,
-        2012 cannot use many TLS ciphers introduced with TLS1.3) and so it can be
-        """
-        return self.domain.find_functional_level(self.ldap_connection)
 
     def find_group(self):
         raise NotImplementedError()
