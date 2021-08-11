@@ -1,4 +1,5 @@
 
+CERTIFICATE_AUTHORITY_OBJECT_CLASS = 'certificationAuthority'
 TRUSTED_DOMAIN_OBJECT_CLASS = 'TrustedDomain'
 COMPUTER_OBJECT_CLASS = 'computer'
 USER_OBJECT_CLASS = 'user'
@@ -13,21 +14,29 @@ WORKSTATION_TRUST_ACCOUNT = 4096
 DONT_EXPIRE_PASSWORD = 65536
 COMPUTER_ACCESS_CONTROL_VAL = WORKSTATION_TRUST_ACCOUNT + DONT_EXPIRE_PASSWORD
 
+# used to get all attributes that aren't derived from other attributes at the time of request.
+# virtual attributes are only populated if specifically requested
+AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS = '*'
+
 # keys for common active directory attributes
 AD_ATTRIBUTE_SAMACCOUNT_NAME = 'sAMAccountName'
-AD_ATTRIBUTE_COMMON_NAME = 'cn'
 AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
+AD_ATTRIBUTE_COMMON_NAME = 'cn'
+AD_ATTRIBUTE_OBJECT_CLASS = 'objectClass'
 
 # keys for general user and computer attributes
 AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'
 AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES = 'servicePrincipalName'
 AD_ATTRIBUTE_PASSWORD = 'unicodePwd'
 
-# keys for attributes most only used by computerscomputer-specifc
+# keys for attributes that are relatively computer-specific
 AD_ATTRIBUTE_ENCRYPTION_TYPES = 'msDS-SupportedEncryptionTypes'
 AD_ATTRIBUTE_KVNO = 'msDS-KeyVersionNumber'
 AD_ATTRIBUTE_DNS_HOST_NAME = 'dNSHostName'
 AD_ATTRIBUTE_ADDITIONAL_DNS_HOST_NAME = 'msDS-AdditionalDnsHostName'
+
+# keys for attributes in certificate authrities
+AD_ATTRIBUTE_CA_CERT = 'caCertificate'
 
 # keys for domains and trusted domains
 AD_DOMAIN_FUNCTIONAL_LEVEL = 'domainFunctionality'
@@ -51,9 +60,12 @@ SAM_ACCOUNT_NAME_LENGTH = 20
 # or less to allow for the trailing $
 LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT = 16
 
-# Active Directory standards for adding computers to a domain
+# Active Directory standards for adding computers to a domain, as well as attribute and location
+# related constants for domain-scope properties like dns servers and CAs
 DEFAULT_COMPUTER_SERVICES = ['HOST']
 DEFAULT_COMPUTER_LOCATION = 'CN=Computers'
+DNS_SERVICE_FILTER = 'DNS/*'
+DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
 
 # when checking if something simply exists, or getting everything at a level/subtree,
 # we use this filter

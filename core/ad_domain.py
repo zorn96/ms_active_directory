@@ -35,6 +35,7 @@ from environment.discovery.discovery_utils import discover_kdc_domain_controller
 from environment.format_utils import format_computer_name_for_authentication
 from environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
 from environment.ldap.ldap_constants import (
+    AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS,
     AD_DOMAIN_FUNCTIONAL_LEVEL,
     AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
     AD_DOMAIN_TIME,
@@ -236,7 +237,7 @@ class ADDomain:
                                 'elements must be strings'.format(type(serv)))
         self.kerberos_uris = kerberos_uris
 
-    def is_close_in_time_to_localhost(self, ldap_connection: Connection=None, allowed_drift_seconds: int=300):
+    def is_close_in_time_to_localhost(self, ldap_connection: Connection=None, allowed_drift_seconds: int=None):
         """ Check if we're close in time to the domain.
         This is primarily useful for kerberos and TLS negotiation health.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
@@ -246,6 +247,8 @@ class ADDomain:
                                       5 minutes is the standard allowable drift for kerberos.
         :return: A boolean indicating whether we're within allowed_drift_seconds seconds of the domain time.
         """
+        if allowed_drift_seconds is None:
+            allowed_drift_seconds = 300
         domain_time = self.find_current_time(ldap_connection)
         local_time = datetime.now(tz=timezone.utc)
         diff = domain_time - local_time
@@ -267,7 +270,9 @@ class ADDomain:
             ldap_connection = self.create_session_as_user().get_ldap_connection()
 
         res = ldap_connection.search(search_base='', search_filter=FIND_ANYTHING_FILTER,
-                                     search_scope=BASE, attributes=[AD_DOMAIN_TIME],
+                                     # querying for time as an attribute explicitly doesn't work since it's not a real
+                                     # ldap attribute in any rfc
+                                     search_scope=BASE, attributes=[AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS],
                                      size_limit=1)
         success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
         if not success:
@@ -292,7 +297,7 @@ class ADDomain:
             ldap_connection = self.create_session_as_user().get_ldap_connection()
 
         res = ldap_connection.search(search_base='', search_filter=FIND_ANYTHING_FILTER,
-                                     search_scope=BASE, attributes=[AD_DOMAIN_FUNCTIONAL_LEVEL],
+                                     search_scope=BASE, attributes=[AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS],
                                      size_limit=1)
         success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
         if not success:
@@ -359,7 +364,8 @@ class ADDomain:
         # Use safe restartable in case the caller uses this in a multi-threaded application.
         if not kwargs.get('client_strategy'):
             conn = Connection(server_pool, user=user, password=password, authentication=authentication_mechanism,
-                              client_strategy=SAFE_RESTARTABLE, source_address=self.source_ip, **kwargs)
+                              client_strategy=SAFE_RESTARTABLE, source_address=self.source_ip,
+                              **kwargs)
         else:
             conn = Connection(server_pool, user=user, password=password, authentication=authentication_mechanism,
                               source_address=self.source_ip, **kwargs)

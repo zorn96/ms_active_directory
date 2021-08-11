@@ -1,4 +1,6 @@
 import copy
+import socket
+import ssl
 
 import logging_utils
 
@@ -264,7 +266,7 @@ class ADSession:
         """
         return self.domain.is_close_in_time_to_localhost(self.ldap_connection, allowed_drift_seconds)
 
-    def find_certificate_authorities_for_domain(self):
+    def find_certificate_authorities_for_domain(self, pem_format: bool=True):
         """ Attempt to discover the CAs within the domain and return info on their certificates.
         If a session was first established using an IP address or blind trust TLS, but we want to bootstrap our
         sessions to establish stronger trust, or write the CA certificates to a local truststore for other
@@ -273,12 +275,37 @@ class ADSession:
         Not all domains run certificate authorities; some use public CAs or get certs from other PKI being run,
         so this isn't useful for everyone. But a lot of people do run CAs in their AD domains, and this is useful
         for them.
+
+        :param pem_format: If True, return the certificates as strings in PEM format. Otherwise, return the
+                           certificates as bytestrings in DER format. Defaults to True.
+        :returns: A list of either PEM-formatted certificate strings or DER-formatted certificate byte strings,
+                  representing the CA certificates of the CAs within the domain.
         """
-        pass
+        ca_filter = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_OBJECT_CLASS,
+                                     ldap_constants.CERTIFICATE_AUTHORITY_OBJECT_CLASS)
+        search_loc = '{},{}'.format(ldap_constants.DOMAIN_WIDE_CONFIGURATIONS_CONTAINER,
+                                    self.domain_search_base)
+        res = self.ldap_connection.search(search_base=search_loc, search_filter=ca_filter, search_scope=SUBTREE,
+                                          attributes=[ldap_constants.AD_ATTRIBUTE_CA_CERT])
+        success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        if not success:
+            raise Exception('Failed to query domain for Certificate Authorities')
+        entities = ldap_utils.remove_ad_search_refs(entities)
+        logger.info('Found %s CAs within the domain', len(entities))
+        ca_certs_der_fmt = []
+        for entity in entities:
+            # the bytes are returned in a 1-item list
+            ca_cert_der_bytes = entity['attributes'][ldap_constants.AD_ATTRIBUTE_CA_CERT][0]
+            ca_certs_der_fmt.append(ca_cert_der_bytes)
+
+        if pem_format:
+            return [ssl.DER_cert_to_PEM_cert(cert_bytes) for cert_bytes in ca_certs_der_fmt]
+        return ca_certs_der_fmt
 
     def find_current_time_for_domain(self):
         """ Get the current time for the domain as a datetime object.
         Just calls the parent domain function and returns that. This is included here for completeness.
+        :returns: A datetime object representing the current time in the domain.
         """
         return self.domain.find_current_time(self.ldap_connection)
 
@@ -292,8 +319,39 @@ class ADSession:
         This won't always be useful, as DNS isn't always part of the AD domain, but it can help if we're bootstrapping
         a computer with manufacturer configurations to use the AD domain for everything based on a minimal starting
         configuration.
+
+        :returns: A dictionary mapping DNS hostnames of DNS servers to IP addresses. The hostnames are provided in case
+                  a caller is configuring DNS-over-TLS. If no IP address can be resolved for a hostname, it will map to
+                  a None value.
+                  https://datatracker.ietf.org/doc/html/rfc8310
         """
-        pass
+        dns_computer_filter = '(&({}={})({}={}))'.format(ldap_constants.AD_ATTRIBUTE_OBJECT_CLASS,
+                                                         ldap_constants.COMPUTER_OBJECT_CLASS,
+                                                         ldap_constants.AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES,
+                                                         ldap_constants.DNS_SERVICE_FILTER)
+        # search the whole domain and grab the dns hostnames of the computers found
+        res = self.ldap_connection.search(search_base=self.domain_search_base, search_filter=dns_computer_filter,
+                                          search_scope=SUBTREE, attributes=[ldap_constants.AD_ATTRIBUTE_DNS_HOST_NAME])
+        success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        if not success:
+            raise Exception('Failed to query domain for Computers hosting DNS services')
+        entities = ldap_utils.remove_ad_search_refs(entities)
+        logger.info('Found %s computers that host DNS services within the domain', len(entities))
+
+        dns_results = {}
+        for entity in entities:
+            hostname = entity['attributes'][ldap_constants.AD_ATTRIBUTE_DNS_HOST_NAME]
+            ip_addr = None
+            try:
+                ip_addr = socket.gethostbyname(hostname)
+            except:
+                logger.warning('Unable to resolve ip address for %s', hostname)
+
+            if hostname in dns_results:
+                logger.warning('Multiple computer entities exist in the domain serving DNS services with the DNS '
+                               'hostname %s - this may indicate a domain misconfiguration issue.', hostname)
+            dns_results[hostname] = ip_addr
+        return dns_results
 
     def find_supported_sasl_mechanisms_for_domain(self):
         """ Attempt to discover the SASL mechanisms supported by the domain and return them.
