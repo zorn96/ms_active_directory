@@ -32,6 +32,7 @@ from environment.kerberos.kerberos_constants import (
     VNO8_FIELD_SIZE_BYTES,
     VNO32_FIELD_SIZE_BYTES,
 )
+from exceptions import KeytabEncodingException
 
 
 logger = logging_utils.get_logger()
@@ -225,7 +226,8 @@ def _write_number_to_hex(number_to_write: int, number_repr_size_in_bytes: int, k
     if keytab_format_version == 2:
         byte_order = 'big'
     elif keytab_format_version != 1:
-        raise Exception('Invalid keytab format version {}. Format version must be 1 or 2'.format(keytab_format_version))
+        raise KeytabEncodingException('Invalid keytab format version {}. Format version must be 1 or 2'
+                                      .format(keytab_format_version))
     # this raises an exception if the number to write is too big to fit in number_repr_size_in_bytes
     return number_to_write.to_bytes(number_repr_size_in_bytes, byte_order).hex()
 

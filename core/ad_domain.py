@@ -6,6 +6,7 @@ import logging_utils
 
 from datetime import datetime, timedelta, timezone
 from ldap3 import (
+    ANONYMOUS,
     BASE,
     Connection,
     FIRST,
@@ -43,6 +44,11 @@ from environment.ldap.ldap_constants import (
 )
 from environment.ldap.ldap_format_utils import process_ldap3_conn_return_value
 from environment.security.security_config_constants import ADEncryptionType
+from exceptions import (
+    DomainConnectException,
+    DomainSearchException,
+    InvalidDomainParameterException,
+)
 
 
 logger = logging_utils.get_logger()
@@ -224,8 +230,8 @@ class ADDomain:
                 ldap_server_objs.append(serv)
                 ldap_uris.append(serv.name)
             else:
-                raise Exception('Invalid type for element of ldap server list, {}; '
-                                'elements must be strings or Server objects'.format(type(serv)))
+                raise InvalidDomainParameterException('Invalid type for element of ldap server list, {}; '
+                                                      'elements must be strings or Server objects'.format(type(serv)))
         self.ldap_servers = ldap_server_objs
         self.ldap_uris = ldap_uris
 
@@ -233,8 +239,8 @@ class ADDomain:
         """ Sets our kerberos server uris """
         for serv in kerberos_uris:
             if not isinstance(serv, str):
-                raise Exception('Invalid type for element of kerberos server list, {}; '
-                                'elements must be strings'.format(type(serv)))
+                raise InvalidDomainParameterException('Invalid type for element of kerberos server list, {}; '
+                                                      'elements must be strings'.format(type(serv)))
         self.kerberos_uris = kerberos_uris
 
     def is_close_in_time_to_localhost(self, ldap_connection: Connection=None, allowed_drift_seconds: int=None):
@@ -265,7 +271,7 @@ class ADDomain:
         :return: A datetime object representing the time.
         """
         if ldap_connection is None:
-            logger.info('Creating a new anonymous connection to read domain supported SASL mechanisms')
+            logger.info('Creating a new anonymous connection to read domain time')
             # we just need an anonymous session to read this information
             ldap_connection = self.create_session_as_user().get_ldap_connection()
 
@@ -276,7 +282,7 @@ class ADDomain:
                                      size_limit=1)
         success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
         if not success:
-            raise Exception('Failed to communicate with the domain to query the current time.')
+            raise DomainSearchException('Failed to search the domain to query the current time.')
         base_attrs = response[0]['attributes']
         # time comes back as a 1-item list in the format ["20210809080919.0Z"]
         # that's a date string yyyyMMddHHmmss.0Z
@@ -292,7 +298,7 @@ class ADDomain:
         :return: An ADVersion enum indicating the functional level.
         """
         if ldap_connection is None:
-            logger.info('Creating a new anonymous connection to read domain supported SASL mechanisms')
+            logger.info('Creating a new anonymous connection to read the domain functional level')
             # we just need an anonymous session to read this information
             ldap_connection = self.create_session_as_user().get_ldap_connection()
 
@@ -301,7 +307,7 @@ class ADDomain:
                                      size_limit=1)
         success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
         if not success:
-            raise Exception('Failed to communicate with the domain to query supported SASL mechanisms.')
+            raise DomainSearchException('Failed search the domain for its functional level')
         base_attrs = response[0]['attributes']
         # this is a single-item list of a string of the level number, like ["7"]
         level_str = base_attrs.get(AD_DOMAIN_FUNCTIONAL_LEVEL)[0]
@@ -325,7 +331,7 @@ class ADDomain:
                                      size_limit=1)
         success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
         if not success:
-            raise Exception('Failed to communicate with the domain to query supported SASL mechanisms.')
+            raise DomainSearchException('Failed to search the domain for supported SASL mechanisms.')
         base_attrs = response[0]['attributes']
         return base_attrs.get(AD_DOMAIN_SUPPORTED_SASL_MECHANISMS, [])
 
@@ -351,8 +357,8 @@ class ADDomain:
     def _create_session(self, user, password, authentication_mechanism, **kwargs):
         """ Internal helper for creating sessions regardless of whether they're for users or computers """
         if len(self.ldap_servers) == 0:
-            raise Exception('Cannot create a session with the AD domain, as there are no LDAP servers '
-                            'known for the domain.')
+            raise DomainConnectException('Cannot create a session with the AD domain, as there are no LDAP servers '
+                                         'known for the domain.')
         # our servers were either user specified (in which case it's a list of ordered preferences) or
         # were discovered automatically (in which case they're ordered by RTT), so use the FIRST strategy
         # to either contact the first preferred server or the fastest/closest server
@@ -377,14 +383,15 @@ class ADDomain:
             if not conn.server.ssl:
                 tls_started = conn.start_tls()
                 if not tls_started:
-                    raise Exception('Unable to StartTLS on connection to domain. Please check the server(s) to ensure '
-                                    'that they have properly configured certificates.')
+                    raise DomainConnectException('Unable to StartTLS on connection to domain. Please check the '
+                                                 'server(s) to ensure that they have properly configured certificates.')
             logger.debug('Successfully secured connection to AD domain %s', self.domain)
         bind_resp = conn.bind()
         bound, result, _, _ = process_ldap3_conn_return_value(conn, bind_resp)
         if not bound:
-            raise Exception('Failed to bind connection to {} - please check the credentials and authentication '
-                            'mechanism in use. LDAP result: {}'.format(conn.server.name, result))
+            raise DomainConnectException('Failed to bind connection to {} - please check the credentials and '
+                                         'authentication mechanism in use. LDAP result: {}'
+                                         .format(conn.server.name, result))
         logger.debug('Successfully bound connection to AD domain %s to establish session', self.domain)
         session = ADSession(conn, self)
         return session
@@ -400,9 +407,9 @@ class ADDomain:
                                    authentication_mechanism: str=KERBEROS, **kwargs):
         """ Create a session with AD domain authenticated as the specified computer. """
         # reject simple binds because computers can't use them for authentication
-        if authentication_mechanism == SIMPLE:
-            raise Exception('Computers must use a form of SASL or NTLM for authenticating LDAP communication with '
-                            'and AD domain.')
+        if authentication_mechanism == SIMPLE or authentication_mechanism == ANONYMOUS:
+            raise InvalidDomainParameterException('Computers must use a form of SASL or NTLM for authenticating LDAP '
+                                                  'communication with and AD domain.')
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and computer %s',
                     self.domain, authentication_mechanism, computer_name)
         # when using EXTERNAL authentication (certificate-based) there might be some weird names, so let power users

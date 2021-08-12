@@ -21,6 +21,7 @@ from environment.security.security_config_constants import (
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
 )
+from exceptions import InvalidComputerParameterException
 
 logger = logging_utils.get_logger()
 
@@ -91,9 +92,9 @@ class ADComputer:
                          encryption_type, self.computer_name)
             return
         if self.password is None:
-            raise Exception('Encryption types can only be added to a computer locally if its '
-                            'password is known. Without the password, new kerberos keys cannot '
-                            'be generated.')
+            raise InvalidComputerParameterException('Encryption types can only be added to a computer locally if its '
+                                                    'password is known. Without the password, new kerberos keys cannot '
+                                                    'be generated.')
         logger.debug('Adding encryption type %s to computer %s locally',
                      encryption_type, self.computer_name)
         self.encryption_types.append(encryption_type)
@@ -162,8 +163,8 @@ class ADComputer:
         set for the computer.
         """
         if self.location is None:
-            raise Exception('The location of the computer is unknown and so a distinguished name cannot be '
-                            'determined for it.')
+            raise InvalidComputerParameterException('The location of the computer is unknown and so a distinguished '
+                                                    'name cannot be determined for it.')
         return construct_object_distinguished_name(self.computer_name, self.location, self.domain_dns_name)
 
     def get_domain(self):
@@ -200,9 +201,9 @@ class ADComputer:
         :param encryption_types: The list of AD encryption types to set on the computer.
         """
         if self.password is None:
-            raise Exception('Encryption types can only be set on a computer locally if its '
-                            'password is known. Without the password, new kerberos keys cannot '
-                            'be generated.')
+            raise InvalidComputerParameterException('Encryption types can only be set on a computer locally if its '
+                                                    'password is known. Without the password, new kerberos keys cannot '
+                                                    'be generated.')
 
         new_kerberos_keys = []
         new_raw_kerberos_keys = []

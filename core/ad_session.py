@@ -18,7 +18,10 @@ import environment.security.security_config_utils as security_utils
 import environment.security.security_config_constants as security_constants
 
 from core.ad_computer import ADComputer
-
+from exceptions import (
+    ObjectCreationException,
+    DomainSearchException
+)
 
 logger = logging_utils.get_logger()
 
@@ -111,9 +114,9 @@ class ADSession:
 
     def _create_object(self, object_dn: str, object_classes: List[str], account_attr_dict: dict):
         if self.dn_exists_in_domain(object_dn):
-            raise Exception('An object already exists within the domain with distinguished name {} - please remove it '
-                            'or change the attributes specified such that a different distinguished name is created.'
-                            .format(object_dn))
+            raise ObjectCreationException('An object already exists within the domain with distinguished name {} - '
+                                          'please remove it or change the attributes specified such that a different '
+                                          'distinguished name is created.'.format(object_dn))
         res = self.ldap_connection.add(object_dn, object_classes, account_attr_dict)
         # TODO: returning the actual response is probably a good idea so we can do something with it.
         # doing more with it in case of error would be a good idea too
@@ -121,8 +124,8 @@ class ADSession:
         if success:
             return success
         # don't include attributes in the exception because a password could be there and it could get logged.
-        raise Exception('An exception was encountered creating an object with distinguished name {} and object classes '
-                        '{}. LDAP result: {}'.format(object_dn, object_classes, result))
+        raise ObjectCreationException('An exception was encountered creating an object with distinguished name {} '
+                                      'and object classes {}. LDAP result: {}'.format(object_dn, object_classes, result))
 
     def create_computer(self, computer_name: str, computer_location: str=None, computer_password: str=None,
                         encryption_types: List[security_constants.ADEncryptionType]=None, hostnames: List[str]=None,
@@ -175,8 +178,8 @@ class ADSession:
         samaccount_name = computer_name + '$'
 
         if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, samaccount_name):
-            raise Exception('An object already exists with sAMAccountName {} so a computer may not be created with '
-                            'the name {}'.format(samaccount_name, computer_name))
+            raise ObjectCreationException('An object already exists with sAMAccountName {} so a computer may not be '
+                                          'created with the name {}'.format(samaccount_name, computer_name))
 
         # get or normalize our computer location. the end format is as a relative distinguished name
         if computer_location is None:
@@ -188,9 +191,10 @@ class ADSession:
         computer_dn = ldap_utils.construct_object_distinguished_name(computer_name, computer_location,
                                                                      self.domain_dns_name)
         if self.dn_exists_in_domain(computer_dn):
-            raise Exception('There exists an object in the domain with distinguished name {} and so a computer may not '
-                            'be created in the domain with name {} in location {}. Please use a different name or '
-                            'location.'.format(computer_dn, computer_name, computer_location))
+            raise ObjectCreationException('There exists an object in the domain with distinguished name {} and so a '
+                                          'computer may not be created in the domain with name {} in location {}. '
+                                          'Please use a different name or location.'
+                                          .format(computer_dn, computer_name, computer_location))
 
         # generate a password if needed and encode it
         if computer_password is None:
@@ -211,11 +215,12 @@ class ADSession:
         spns = ldap_utils.construct_service_principal_names(services, hostnames)
         for spn in spns:
             if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES, spn):
-                raise Exception('An object exists in the domain with service principal name {} and so creating a '
-                                'computer with the hostnames ({}) and services ({}) in use will cause undefined, '
-                                'conflicting behavior during lookups. Please specify different hostnames or services, '
-                                'or a different computer name if hostnames are not being explicitly set.'
-                                .format(spn, ', '.join(hostnames), ', '.join(services)))
+                raise ObjectCreationException('An object exists in the domain with service principal name {} and so '
+                                              'creating a computer with the hostnames ({}) and services ({}) in use '
+                                              'will cause undefined, conflicting behavior during lookups. Please '
+                                              'specify different hostnames or services, or a different computer name '
+                                              'if hostnames are not being explicitly set.'
+                                              .format(spn, ', '.join(hostnames), ', '.join(services)))
 
         computer_attributes = {
             ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL: ldap_constants.COMPUTER_ACCESS_CONTROL_VAL,
@@ -290,7 +295,7 @@ class ADSession:
                                           attributes=[ldap_constants.AD_ATTRIBUTE_CA_CERT])
         success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
         if not success:
-            raise Exception('Failed to query domain for Certificate Authorities')
+            raise DomainSearchException('Failed to search domain for Certificate Authorities')
         entities = ldap_utils.remove_ad_search_refs(entities)
         logger.info('Found %s CAs within the domain', len(entities))
         ca_certs_der_fmt = []
@@ -335,7 +340,7 @@ class ADSession:
                                           search_scope=SUBTREE, attributes=[ldap_constants.AD_ATTRIBUTE_DNS_HOST_NAME])
         success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
         if not success:
-            raise Exception('Failed to query domain for Computers hosting DNS services')
+            raise DomainSearchException('Failed to search domain for Computers hosting DNS services')
         entities = ldap_utils.remove_ad_search_refs(entities)
         logger.info('Found %s computers that host DNS services within the domain', len(entities))
 
@@ -364,13 +369,12 @@ class ADSession:
                                           search_scope=BASE, attributes=[ldap_constants.AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS])
         success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
         if not success:
-            raise Exception('Failed to query domain for schema.')
+            raise DomainSearchException('Failed to search domain for schema.')
         entities = ldap_utils.remove_ad_search_refs(entities)
         if len(entities) == 0:
-            raise Exception('Did not find schema when querying domain.')
+            raise DomainSearchException('The forest schema could not be found when searching the domain.')
         schema = entities[0]
         ad_schema_ver = schema['attributes'][ldap_constants.AD_SCHEMA_VERSION]
-        print(ad_schema_ver)
         return constants.ADVersion.get_version_from_schema_number(ad_schema_ver)
 
     def find_functional_level_for_domain(self):

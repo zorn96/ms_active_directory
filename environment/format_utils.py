@@ -13,6 +13,7 @@ from ldap3.utils.dn import (
 )
 
 from environment.ldap.ldap_format_utils import is_dn
+from exceptions import InvalidDomainParameterException
 
 
 logger = logging_utils.get_logger()
@@ -23,8 +24,9 @@ def format_computer_name_for_authentication(computer_name: str, domain: str, aut
     if is_dn(computer_name):
         parse_dn(computer_name)
         name_format = 'domain\\sAMAccountName' if authentication_mechanism == NTLM else 'sAMAccountName@domain'
-        raise Exception('Computer names may not be specified as distinguished names for LDAP authentication. '
-                        'Please specify the computer name in the format {}'.format(name_format))
+        raise InvalidDomainParameterException('Computer names may not be specified as distinguished names for LDAP '
+                                              'authentication. Please specify the computer name in the format {}'
+                                              .format(name_format))
 
     adjusted_computer_name = computer_name.lower()
     # split up domain and computer name if they're already both included. @ and \ are not valid

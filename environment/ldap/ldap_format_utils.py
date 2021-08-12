@@ -10,6 +10,7 @@ from environment.ldap.ldap_constants import (
     SAM_ACCOUNT_NAME_LENGTH,
     LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT,
 )
+from exceptions import InvalidDomainParameterException
 
 
 logger = logging_utils.get_logger()
@@ -220,10 +221,10 @@ def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bo
     if name.endswith('$'):
         name = name[:-1]
     if len(name) > limit:
-        raise Exception('Computer name length must be fewer than {} characters for computers that {} legacy behavior.'
-                        .format(limit, 'support' if supports_legacy_behavior else 'do not support'))
+        raise InvalidDomainParameterException('Computer name length must be fewer than {} characters for computers '
+                                              'that {} legacy behavior.'.format(limit, 'support' if supports_legacy_behavior else 'do not support'))
     for character in AD_USERNAME_RESTRICTED_CHARS:
         if character in name:
-            raise Exception('AD computer names may not contain any of the following characters: {}'
-                            .format(', '.join(AD_USERNAME_RESTRICTED_CHARS)))
+            raise InvalidDomainParameterException('AD computer names may not contain any of the following characters: '
+                                                  '{}'.format(', '.join(AD_USERNAME_RESTRICTED_CHARS)))
     return name

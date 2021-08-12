@@ -28,6 +28,7 @@ from environment.kerberos.kerberos_constants import (
     VNO8_FIELD_SIZE_BYTES,
     VNO32_FIELD_SIZE_BYTES,
 )
+from exceptions import KeytabEncodingException
 
 
 logger = logging_utils.get_logger()
@@ -43,7 +44,8 @@ def process_keytab_bytes_to_extract_entries(keytab: bytes):
 def process_keytab_file_to_extract_entries(keytab_file_path: str):
     """ Given a file path for a keytab, extract keytab entries from it and return them as GSSKerberosKeys. """
     if not os.path.isfile(keytab_file_path):
-        raise Exception('File {} cannot be found for reading keytabs.'.format(keytab_file_path))
+        raise KeytabEncodingException('File {} cannot be found for reading keytabs.'
+                                      .format(keytab_file_path))
     keytab_data = open(keytab_file_path, 'rb').read()
     return process_keytab_bytes_to_extract_entries(keytab_data)
 
@@ -87,7 +89,7 @@ def _read_bytes_as_number(keytab: str, index: int, bytes_to_read: int=1, keytab_
             converted_from_little_endian.insert(0, hex_string_to_parse[i:i+2])
         hex_string_to_parse = ''.join(converted_from_little_endian)
     elif keytab_format_version != 2:
-        raise Exception('Unrecognized keytab format version {}'.format(keytab_format_version))
+        raise KeytabEncodingException('Unrecognized keytab format version {}'.format(keytab_format_version))
 
     unsigned_value = int(hex_string_to_parse, 16)
     if is_signed_int:
@@ -162,8 +164,8 @@ def process_hex_string_keytab_file_to_extract_entries(keytab):
     start_byte = _read_bytes_as_number(keytab, bytes_to_read=KEYTAB_STANDARD_LEADING_BYTES_SIZE,
                                        index=current_keytab_position)
     if start_byte != 5:
-        raise Exception('Keytabs must always start with 0x05 as the leading byte, as only Kerberos v5 keytabs are '
-                        'supported. Seen leading byte: {}'.format(start_byte))
+        raise KeytabEncodingException('Keytabs must always start with 0x05 as the leading byte, as only Kerberos v5 '
+                                      'keytabs are supported. Seen leading byte: {}'.format(start_byte))
     # one byte is 2 hex digits, so move positions equal to 2x our size in bytes
     current_keytab_position += 2*KEYTAB_STANDARD_LEADING_BYTES_SIZE
 
@@ -174,8 +176,9 @@ def process_hex_string_keytab_file_to_extract_entries(keytab):
                                                   keytab_format_version=KEYTAB_FORMAT_VERSION_FOR_KEYTAB_FORMAT_VERSION,
                                                   index=current_keytab_position)
     if keytab_format_version != 1 and keytab_format_version != 2:
-        raise Exception('Unrecognized and unsupported keytab format version: {}'
-                        .format(keytab_format_version))
+        raise KeytabEncodingException('Unrecognized and unsupported keytab format version: {}'
+                                      .format(keytab_format_version))
+    logger.debug('Ingesting keytab with format version %s', keytab_format_version)
     # one byte is 2 hex digits, so move positions equal to 2x our size in bytes
     current_keytab_position += 2*KEYTAB_FORMAT_SIZE_BYTES
 
@@ -205,13 +208,14 @@ def process_hex_string_keytab_file_to_extract_entries(keytab):
                 num_components = _read_bytes_as_number(keytab, index=current_keytab_position,
                                                        bytes_to_read=NUM_COMPONENTS_FIELD_SIZE_BYTES,
                                                        keytab_format_version=keytab_format_version)
+                logger.debug('Reading %s components from keytab entry in slot', num_components, slot)
 
                 # the number of components encoded in a format v1 keytab is 1 greater than it is supposed to be
                 if keytab_format_version == 1:
                     num_components -= 1
 
                 if num_components == 0 and entry_length_bytes == 3:
-                    raise Exception('Malformed keytab file detected. Slots are not encoded.')
+                    raise KeytabEncodingException('Malformed keytab file detected. Slots are not encoded.')
 
                 # since our string is hex, a byte is represented by 2 characters, so we move our index forwards by twice
                 # the number of bytes we read
@@ -222,7 +226,8 @@ def process_hex_string_keytab_file_to_extract_entries(keytab):
                                                                                                      REALM_LENGTH_FIELD_SIZE_BYTES,
                                                                                                      keytab_format_version)
                 if realm_length == 0:
-                    raise Exception('Malformed keytab file detected. A realm length of 0 is encoded to a keytab.')
+                    raise KeytabEncodingException('Malformed keytab file detected. A realm length of 0 is encoded to a '
+                                                  'keytab.')
                 realm, current_keytab_position = _read_bytes_to_string_and_then_move_position(keytab, current_keytab_position,
                                                                                               realm_length)
 
@@ -326,12 +331,12 @@ def process_hex_string_keytab_file_to_extract_entries(keytab):
                 string_enc_type = KRB5_ENC_TYPE_VALUE_TO_ENC_TYPE_MAP[encryption_type]
                 raw_key = RawKerberosKey(string_enc_type, binascii.unhexlify(hex_encoded_key))
                 keytab_entry = GssKerberosKey(principal, realm, raw_key, vno,
-                                              flags, timestamp, name_type, keytab_format_version,
-                                              binascii.unhexlify(single_entry_value))
+                                              flags, timestamp, name_type, keytab_format_version)
                 entries.append(keytab_entry)
             else:
                 # 0 length or negative length keytabs indicate deleted entries that were not erased from the file
                 # so we skip them
+                logger.debug('Skipping %s length keytab due to indication of a deleted entry', abs(entry_length_bytes))
                 current_keytab_position += abs(entry_length_bytes) * 2
         finally:
             entry_length_bytes, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
@@ -339,4 +344,5 @@ def process_hex_string_keytab_file_to_extract_entries(keytab):
                                                                                                        keytab_format_version,
                                                                                                        is_signed_int=True)
             slot += 1
+    logger.debug('Extracted %s kerberos keys from keytab', len(entries))
     return entries

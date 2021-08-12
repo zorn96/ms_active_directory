@@ -14,6 +14,10 @@ from environment.security.security_config_constants import (
     ENCRYPTION_TYPE_VALUE_TO_ENUM,
     UNSUPPORTED_ENC_TYPES,
 )
+from exceptions import (
+    InvalidLdapParameterException,
+    LdapResponseDecodeException,
+)
 
 
 logger = logging_utils.get_logger()
@@ -69,7 +73,8 @@ def get_supported_encryption_type_enums_from_value(encryption_types_value: int):
     # if we have a non-zero remainder, then there's some encryption type encoded that we don't
     # recognize
     if encryption_types_value != 0:
-        raise Exception('Un-parseable encryption type value from AD: {}'.format(encryption_types_value))
+        raise LdapResponseDecodeException('Un-parseable encryption type value from AD: {}'
+                                          .format(encryption_types_value))
 
     return encryption_types
 
@@ -83,9 +88,9 @@ def normalize_encryption_type_list(encryption_types: List[ADEncryptionType]):
             # cast to lowercase for looking in our dict
             encryption_type = ENCRYPTION_TYPE_STR_TO_ENUM.get(encryption_type.lower())
         if encryption_type is None or not isinstance(encryption_type, ADEncryptionType):
-            raise Exception('All members of an encryption type list must by encryption type enums or '
-                            'must be strings that map to encryption type enums. Valid strings are: {}'
-                            .format(', '.join(valid_strings)))
+            raise InvalidLdapParameterException('All members of an encryption type list must by encryption type enums '
+                                                'or must be strings that map to encryption type enums. Valid strings '
+                                                'are: {}'.format(', '.join(valid_strings)))
 
         if encryption_type in UNSUPPORTED_ENC_TYPES:
             raise NotImplementedError('Support for encryption type {} has not been implemented'
