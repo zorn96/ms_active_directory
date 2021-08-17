@@ -18,6 +18,7 @@ import environment.security.security_config_utils as security_utils
 import environment.security.security_config_constants as security_constants
 
 from core.ad_computer import ADComputer
+from core.ad_users_and_groups import ADGroup, ADUser
 from exceptions import (
     ObjectCreationException,
     DomainSearchException
@@ -187,6 +188,9 @@ class ADSession:
         else:
             computer_location = ldap_utils.normalize_object_location_in_domain(computer_location,
                                                                                self.domain_dns_name)
+        if not self.dn_exists_in_domain(computer_location):
+            raise ObjectCreationException('The computer location {} cannot be found in the domain.'
+                                          .format(computer_location))
         # now we can build our full object distinguished name
         computer_dn = ldap_utils.construct_object_distinguished_name(computer_name, computer_location,
                                                                      self.domain_dns_name)
@@ -255,15 +259,6 @@ class ADSession:
                               done for this as a common name. If no unique computer can be found with that
                               search, then an exception will be raised.
         """
-        raise NotImplementedError()
-
-    def create_user(self):
-        raise NotImplementedError()
-
-    def find_user(self):
-        raise NotImplementedError()
-
-    def create_group(self):
         raise NotImplementedError()
 
     def is_domain_close_in_time_to_localhost(self, allowed_drift_seconds=None):
@@ -396,11 +391,150 @@ class ADSession:
         """
         return self.domain.find_supported_sasl_mechanisms(self.ldap_connection)
 
-    def find_group(self):
-        raise NotImplementedError()
+    def _find_user_or_group_and_attrs(self, search_base: str, search_filter:str, search_scope: str,
+                                      attributes: List[str], size_limit: int, return_type):
+        """ A helper function for common search and result parsing logic in other find functions for users
+        and groups
+        """
+        attrs = self._figure_out_search_attributes_for_user_or_group(attributes)
+        res = self.ldap_connection.search(search_base=search_base,
+                                          search_filter=search_filter,
+                                          search_scope=search_scope,
+                                          size_limit=size_limit,
+                                          attributes=attrs)
+        _, _, resp, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        resp = ldap_utils.remove_ad_search_refs(resp)
+        if not resp:
+            return []
 
-    def find_groups_for_user(self):
-        raise NotImplementedError()
+        results = []
+        for entry in resp:
+            entry_attributes = entry['attributes']
+            obj = return_type(entry['dn'], entry_attributes, self.domain)
+            results.append(obj)
+        return results
 
-    def find_groups_for_group(self):
-        raise NotImplementedError()
+    def find_groups_by_common_name(self, group_name: str, attributes_to_lookup: List[str]=None):
+        """ Find all groups with a given common name and return a list of ADGroup objects.
+        This is particularly useful when you have multiple groups with the same name in different OUs
+        as a result of a migration, and want to find them so you can combine them.
+
+        :param group_name: The common name of the group(s) to be looked up.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
+                                     what's specified, the groups' name and object class attributes will be queried.
+        :returns: a list of ADGroup objects representing groups with the specified common name.
+        """
+        # build a compound filter for users with this common name
+        search_filter = '(&({cn_attr}={cn}){type_filter})'.format(cn_attr=ldap_constants.AD_ATTRIBUTE_COMMON_NAME,
+                                                                  cn=group_name,
+                                                                  type_filter=ldap_constants.FIND_GROUP_FILTER)
+        # a size limit of 0 means unlimited
+        res = self._find_user_or_group_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                                 attributes_to_lookup, 0, ADGroup)
+        logger.info('%s groups found with common name %s', len(res), group_name)
+        return res
+
+    def find_group_by_distinguished_name(self, group_dn: str, attributes_to_lookup: List[str]=None):
+        """ Find a group in AD based on a specified distinguished name and return it along with any
+        requested attributes.
+        :param group_dn: The distinguished name of the group.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
+                                     what's specified, the group's name and object class attributes will be queried.
+        :returns: an ADGroup object or None if the group does not exist.
+        """
+        # since the distinguished name may be a relative distinguished name or complete one,
+        # normalize it
+        normalized_rdn = ldap_utils.normalize_object_location_in_domain(group_dn,
+                                                                        self.domain_dns_name)
+        search_dn = normalized_rdn + ',' + self.domain_search_base
+        res = self._find_user_or_group_and_attrs(search_dn, ldap_constants.FIND_GROUP_FILTER, BASE,
+                                                 attributes_to_lookup, 1, ADGroup)
+        if not res:
+            return None
+        return res[0]
+
+    def find_group_by_sam_name(self, group_name, attributes_to_lookup=None):
+        """ Find a Group in AD based on a specified sAMAccountName name and return it along with any
+        requested attributes.
+        :param group_name: The sAMAccountName name of the group.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :returns: an ADGroup object or None if the user does not exist.
+        """
+        # build a compound filter for users with this samaccountname
+        search_filter = '(&({sam_attr}={sam_name}){type_filter})'.format(sam_attr=ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME,
+                                                                         sam_name=group_name,
+                                                                         type_filter=ldap_constants.FIND_GROUP_FILTER)
+        res = self._find_user_or_group_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                                 attributes_to_lookup, 1, ADGroup)
+        if not res:
+            return None
+        return res[0]
+
+    def find_users_by_common_name(self, user_name: str, attributes_to_lookup: List[str]=None):
+        """ Find all users with a given common name and return a list of ADUser objects.
+        This is particularly useful when you have multiple users with the same name in different OUs
+        as a result of a migration, and want to find them so you can combine them.
+
+        :param user_name: The common name of the user(s) to be looked up.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the users. Regardless of
+                                     what's specified, the users' name and object class attributes will be queried.
+        :returns: a list of ADUser objects representing users with the specified common name.
+        """
+        # build a compound filter for users with this common name
+        search_filter = '(&({cn_attr}={cn}){type_filter})'.format(cn_attr=ldap_constants.AD_ATTRIBUTE_COMMON_NAME,
+                                                                  cn=user_name,
+                                                                  type_filter=ldap_constants.FIND_USER_FILTER)
+        # a size limit of 0 means unlimited
+        res = self._find_user_or_group_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                                 attributes_to_lookup, 0, ADUser)
+        logger.info('%s users found with common name %s', len(res), user_name)
+        return res
+
+    def find_user_by_distinguished_name(self, user_dn: str, attributes_to_lookup: List[str]=None):
+        """ Find a User in AD based on a specified distinguished name and return it along with any
+        requested attributes.
+        :param user_dn: The distinguished name of the user.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the user. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :returns: an ADUser object or None if the user does not exist.
+        """
+        # since the distinguished name may be a relative distinguished name or complete one,
+        # normalize it
+        normalized_rdn = ldap_utils.normalize_object_location_in_domain(user_dn,
+                                                                        self.domain_dns_name)
+        search_dn = normalized_rdn + ',' + self.domain_search_base
+        res = self._find_user_or_group_and_attrs(search_dn, ldap_constants.FIND_USER_FILTER, BASE,
+                                                 attributes_to_lookup, 1, ADUser)
+        if not res:
+            return None
+        return res[0]
+
+    def find_user_by_sam_name(self, user_name, attributes_to_lookup: List[str]=None):
+        """ Find a User in AD based on a specified sAMAccountName name and return it along with any
+        requested attributes.
+        :param user_name: The sAMAccountName name of the user.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the user. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :returns: an ADUser object or None if the user does not exist.
+        """
+        # build a compound filter for users with this samaccountname
+        search_filter = '(&({sam_attr}={sam_name}){type_filter})'.format(sam_attr=ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME,
+                                                                         sam_name=user_name,
+                                                                         type_filter=ldap_constants.FIND_USER_FILTER)
+        res = self._find_user_or_group_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                                 attributes_to_lookup, 1, ADUser)
+        if not res:
+            return None
+        return res[0]
+
+    def _figure_out_search_attributes_for_user_or_group(self, attributes_to_lookup):
+        """ There's some attributes we'll always get for users and groups, whether callers requested them or not.
+        This combines those with any requested attributes
+        """
+        base_group_attrs = {ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, ldap_constants.AD_ATTRIBUTE_OBJECT_CLASS,
+                            ldap_constants.AD_ATTRIBUTE_COMMON_NAME}
+        if attributes_to_lookup:
+            base_group_attrs.update(set(base_group_attrs))
+        # sort for reproducibility in eventual testing
+        return sorted(list(base_group_attrs))

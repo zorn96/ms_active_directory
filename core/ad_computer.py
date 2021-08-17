@@ -33,6 +33,7 @@ class ADComputer:
                  encryption_types: List[ADEncryptionType]=None, kvno: int=None):
         self.samaccount_name = samaccount_name
         self.computer_name = self.samaccount_name[:-1]
+        self.name = self.computer_name
         self.domain = domain
         self.domain_dns_name = self.domain.get_domain_dns_name()
         self.realm = self.domain_dns_name.upper()
@@ -175,6 +176,9 @@ class ADComputer:
 
     def get_encryption_types(self):
         return self.encryption_types
+
+    def get_name(self):
+        return self.name
 
     def get_samaccount_name(self):
         return self.samaccount_name

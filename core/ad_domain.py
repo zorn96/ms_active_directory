@@ -354,7 +354,7 @@ class ADDomain:
         kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain, site=self.site)
         self.set_kerberos_uris(kerberos_uris)
 
-    def _create_session(self, user, password, authentication_mechanism, **kwargs):
+    def _create_connection(self, user, password, authentication_mechanism, **kwargs):
         """ Internal helper for creating sessions regardless of whether they're for users or computers """
         if len(self.ldap_servers) == 0:
             raise DomainConnectException('Cannot create a session with the AD domain, as there are no LDAP servers '
@@ -393,25 +393,33 @@ class ADDomain:
                                          'authentication mechanism in use. LDAP result: {}'
                                          .format(conn.server.name, result))
         logger.debug('Successfully bound connection to AD domain %s to establish session', self.domain)
-        session = ADSession(conn, self)
-        return session
+        return conn
+
+    def create_ldap_connection_as_user(self, user: str=None, password: str=None, authentication_mechanism: str=None,
+                                       **kwargs):
+        """ Create an LDAP connection with AD domain authenticated as the specified user. """
+        logger.info('Establishing connection with AD domain %s using LDAP authentication mechanism %s and user %s',
+                    self.domain, authentication_mechanism, user)
+        return self._create_connection(user, password, authentication_mechanism, **kwargs)
 
     def create_session_as_user(self, user: str=None, password: str=None, authentication_mechanism: str=None,
                                **kwargs):
         """ Create a session with AD domain authenticated as the specified user. """
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and user %s',
                     self.domain, authentication_mechanism, user)
-        return self._create_session(user, password, authentication_mechanism, **kwargs)
+        conn = self._create_connection(user, password, authentication_mechanism, **kwargs)
+        session = ADSession(conn, self)
+        return session
 
-    def create_session_as_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
-                                   authentication_mechanism: str=KERBEROS, **kwargs):
-        """ Create a session with AD domain authenticated as the specified computer. """
+    def create_ldap_connection_as_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
+                                           authentication_mechanism: str=KERBEROS, **kwargs):
+        """ Create an LDAP connection with AD domain authenticated as the specified computer. """
+        logger.info('Establishing LDAP connection with AD domain %s using LDAP authentication mechanism %s and computer %s',
+                    self.domain, authentication_mechanism, computer_name)
         # reject simple binds because computers can't use them for authentication
         if authentication_mechanism == SIMPLE or authentication_mechanism == ANONYMOUS:
             raise InvalidDomainParameterException('Computers must use a form of SASL or NTLM for authenticating LDAP '
                                                   'communication with and AD domain.')
-        logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and computer %s',
-                    self.domain, authentication_mechanism, computer_name)
         # when using EXTERNAL authentication (certificate-based) there might be some weird names, so let power users
         # skip our helpful name formatting/validation logic in case it causes issues
         formatted_name = computer_name
@@ -422,7 +430,17 @@ class ADDomain:
         if authentication_mechanism != NTLM:
             kwargs['sasl_mechanism'] = authentication_mechanism
             authentication_mechanism = SASL
-        return self._create_session(formatted_name, computer_password, authentication_mechanism, **kwargs)
+        return self._create_connection(formatted_name, computer_password, authentication_mechanism, **kwargs)
+
+    def create_session_as_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
+                                   authentication_mechanism: str=KERBEROS, **kwargs):
+        """ Create a session with AD domain authenticated as the specified computer. """
+        logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and computer %s',
+                    self.domain, authentication_mechanism, computer_name)
+        conn = self.create_ldap_connection_as_computer(computer_name, computer_password, check_name_format,
+                                                       authentication_mechanism, **kwargs)
+        session = ADSession(conn, self)
+        return session
 
     def join(self, admin_username: str, admin_password: str, authentication_mechanism: str=SIMPLE,
              computer_name: str=None, computer_location: str=None, computer_password: str=None,

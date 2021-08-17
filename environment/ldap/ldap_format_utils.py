@@ -19,7 +19,11 @@ logger = logging_utils.get_logger()
 def is_dn(anything: str):
     """ Determine if a specified string is a distinguished name. """
     try:
-        parse_dn(anything)
+        # our sessions all set check_names to the default value of True, so dns will be escaped
+        # in search bases and such. therefore we escape them here.
+        # if this is a check for filtering, then we'll be getting the unescaped value to figure out
+        # how to best escape it, so definitely escape it to avoid errors from special characters
+        parse_dn(anything, escape=True)
         return True
     except LDAPInvalidDnError:
         return False

@@ -72,3 +72,5 @@ DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
 # when checking if something simply exists, or getting everything at a level/subtree,
 # we use this filter
 FIND_ANYTHING_FILTER = '(objectClass=*)'
+FIND_GROUP_FILTER = '(objectClass=Group)'
+FIND_USER_FILTER = '(objectClass=User)'
