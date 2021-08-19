@@ -1,16 +1,16 @@
-import logging_utils
+from ms_active_directory import logging_utils
 
 from ldap3 import Connection
 from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
 from typing import List
 
-from environment.ldap.ldap_constants import (
+from ms_active_directory.environment.ldap.ldap_constants import (
     AD_USERNAME_RESTRICTED_CHARS,
     SAM_ACCOUNT_NAME_LENGTH,
     LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT,
 )
-from exceptions import InvalidDomainParameterException
+from ms_active_directory.exceptions import InvalidDomainParameterException
 
 
 logger = logging_utils.get_logger()

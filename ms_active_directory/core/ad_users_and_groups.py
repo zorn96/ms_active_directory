@@ -1,10 +1,10 @@
 
-from environment.ldap.ldap_constants import (
+from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_COMMON_NAME,
     AD_ATTRIBUTE_OBJECT_CLASS,
     AD_ATTRIBUTE_SAMACCOUNT_NAME
 )
-from environment.ldap.ldap_format_utils import (
+from ms_active_directory.environment.ldap.ldap_format_utils import (
     normalize_object_location_in_domain
 )
 

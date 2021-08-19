@@ -2,17 +2,17 @@
 import binascii
 import os
 
-import logging_utils
+from ms_active_directory import logging_utils
 
-from core.ad_kerberos_keys import GssKerberosKey, RawKerberosKey
+from ms_active_directory.core.ad_kerberos_keys import GssKerberosKey, RawKerberosKey
 # constants for structuring in-memory keytab representations
-from environment.kerberos.kerberos_constants import (
+from ms_active_directory.environment.kerberos.kerberos_constants import (
     KEYTAB_FORMAT_VERSION_FOR_KEYTAB_FORMAT_VERSION,
     KRB5_ENC_TYPE_VALUE_TO_ENC_TYPE_MAP,
 )
 
 # constants for parsing keytab data, as a separate import for improved readability
-from environment.kerberos.kerberos_constants import (
+from ms_active_directory.environment.kerberos.kerberos_constants import (
     ENCRYPTION_TYPE_FIELD_SIZE,
     ENTRY_LENGTH_FIELD_SIZE_BYTES,
     FLAGS_FIELD_SIZE_BYTES,
@@ -28,7 +28,7 @@ from environment.kerberos.kerberos_constants import (
     VNO8_FIELD_SIZE_BYTES,
     VNO32_FIELD_SIZE_BYTES,
 )
-from exceptions import KeytabEncodingException
+from ms_active_directory.exceptions import KeytabEncodingException
 
 
 logger = logging_utils.get_logger()

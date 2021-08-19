@@ -7,12 +7,12 @@ import binascii
 import math
 import time
 
-import logging_utils
+from ms_active_directory import logging_utils
 
 from typing import List
 
 
-from environment.kerberos.kerberos_constants import (
+from ms_active_directory.environment.kerberos.kerberos_constants import (
     DEFAULT_UNKNOWN_NAME_TYPE,
     ENCRYPTION_TYPE_FIELD_SIZE,
     ENTRY_LENGTH_FIELD_SIZE_BYTES,
@@ -32,7 +32,7 @@ from environment.kerberos.kerberos_constants import (
     VNO8_FIELD_SIZE_BYTES,
     VNO32_FIELD_SIZE_BYTES,
 )
-from exceptions import KeytabEncodingException
+from ms_active_directory.exceptions import KeytabEncodingException
 
 
 logger = logging_utils.get_logger()

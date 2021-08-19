@@ -2,7 +2,7 @@ import copy
 import socket
 import ssl
 
-import logging_utils
+from ms_active_directory import logging_utils
 
 from ldap3 import (
     BASE,
@@ -11,15 +11,15 @@ from ldap3 import (
 )
 from typing import List
 
-import environment.constants as constants
-import environment.ldap.ldap_format_utils as ldap_utils
-import environment.ldap.ldap_constants as ldap_constants
-import environment.security.security_config_utils as security_utils
-import environment.security.security_config_constants as security_constants
+import ms_active_directory.environment.constants as constants
+import ms_active_directory.environment.ldap.ldap_format_utils as ldap_utils
+import ms_active_directory.environment.ldap.ldap_constants as ldap_constants
+import ms_active_directory.environment.security.security_config_utils as security_utils
+import ms_active_directory.environment.security.security_config_constants as security_constants
 
-from core.ad_computer import ADComputer
-from core.ad_users_and_groups import ADGroup, ADUser
-from exceptions import (
+from ms_active_directory.core.ad_computer import ADComputer
+from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser
+from ms_active_directory.exceptions import (
     ObjectCreationException,
     DomainSearchException
 )

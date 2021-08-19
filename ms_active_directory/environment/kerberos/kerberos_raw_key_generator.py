@@ -5,7 +5,7 @@ type and password bytes.
 Optionally, the bytes for a salt may be supplied, and iteration count may be specified
 for those encryption types that support salting or multiple iterations.
 """
-import logging_utils
+from ms_active_directory import logging_utils
 
 from functools import reduce
 
@@ -14,15 +14,15 @@ from Crypto.Cipher import AES
 from Crypto.Hash import HMAC, MD4, SHA  # SHA is SHA1, not SHA256 or SHA384
 from Crypto.Protocol.KDF import PBKDF2  # password-based key derivation function
 
-from core.ad_kerberos_keys import RawKerberosKey
+from ms_active_directory.core.ad_kerberos_keys import RawKerberosKey
 
-from environment.kerberos.kerberos_constants import (
+from ms_active_directory.environment.kerberos.kerberos_constants import (
     AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP,
     AES_CIPHER_BLOCK_SIZE_BYTES,
     AES_ITERATIONS_FOR_AD,
     SALT_FORMAT_FOR_AD,
 )
-from environment.security.security_config_constants import (
+from ms_active_directory.environment.security.security_config_constants import (
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
 )

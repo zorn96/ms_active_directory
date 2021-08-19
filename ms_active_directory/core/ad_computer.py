@@ -1,27 +1,27 @@
-import logging_utils
+from ms_active_directory import logging_utils
 
 from typing import List
 
-from core.ad_kerberos_keys import (
+from ms_active_directory.core.ad_kerberos_keys import (
     GssKerberosKey,
 )
-from environment.kerberos.kerberos_constants import (
+from ms_active_directory.environment.kerberos.kerberos_constants import (
     AD_DEFAULT_NAME_TYPE
 )
-from environment.kerberos.kerberos_keytab_generator import (
+from ms_active_directory.environment.kerberos.kerberos_keytab_generator import (
     write_gss_kerberos_key_list_to_raw_bytes
 )
-from environment.kerberos.kerberos_raw_key_generator import (
+from ms_active_directory.environment.kerberos.kerberos_raw_key_generator import (
     ad_password_string_to_key
 )
-from environment.ldap.ldap_format_utils import (
+from ms_active_directory.environment.ldap.ldap_format_utils import (
     construct_object_distinguished_name
 )
-from environment.security.security_config_constants import (
+from ms_active_directory.environment.security.security_config_constants import (
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
 )
-from exceptions import InvalidComputerParameterException
+from ms_active_directory.exceptions import InvalidComputerParameterException
 
 logger = logging_utils.get_logger()
 

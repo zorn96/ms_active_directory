@@ -2,7 +2,7 @@ import copy
 import pytz
 import socket
 
-import logging_utils
+from ms_active_directory import logging_utils
 
 from datetime import datetime, timedelta, timezone
 from ldap3 import (
@@ -30,21 +30,21 @@ from ssl import (
 from typing import List
 
 # local imports come after imports from other libraries
-from core.ad_session import ADSession
-from environment.constants import ADFunctionalLevel
-from environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
-from environment.format_utils import format_computer_name_for_authentication
-from environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
-from environment.ldap.ldap_constants import (
+from ms_active_directory.core.ad_session import ADSession
+from ms_active_directory.environment.constants import ADFunctionalLevel
+from ms_active_directory.environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
+from ms_active_directory.environment.format_utils import format_computer_name_for_authentication
+from ms_active_directory.environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
+from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS,
     AD_DOMAIN_FUNCTIONAL_LEVEL,
     AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
     AD_DOMAIN_TIME,
     FIND_ANYTHING_FILTER,
 )
-from environment.ldap.ldap_format_utils import process_ldap3_conn_return_value
-from environment.security.security_config_constants import ADEncryptionType
-from exceptions import (
+from ms_active_directory.environment.ldap.ldap_format_utils import process_ldap3_conn_return_value
+from ms_active_directory.environment.security.security_config_constants import ADEncryptionType
+from ms_active_directory.exceptions import (
     DomainConnectException,
     DomainSearchException,
     InvalidDomainParameterException,

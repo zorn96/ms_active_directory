@@ -6,8 +6,7 @@ import dns.resolver
 import socket
 import time
 
-import environment.format_utils as format_utils
-import logging_utils
+import ms_active_directory.environment.format_utils as format_utils
 
 # environmental interactions are lightweight and primarily IO-bounded, not CPU-bounded.
 # most of our time is spent waiting on replies, so we use a thread pool instead of a
@@ -17,13 +16,14 @@ from dns.rdatatype import SRV, RdataType
 from ldap3 import Connection, Server, DSA
 from typing import List, Callable
 
-from environment.discovery.discovery_constants import (
+from ms_active_directory.environment.discovery.discovery_constants import (
     DNS_TIMEOUT_SECONDS,
     KERBEROS_DNS_SRV_FORMAT,
     KERBEROS_SITE_AWARE_DNS_SRV_FORMAT,
     LDAP_DNS_SRV_FORMAT,
     LDAP_SITE_AWARE_DNS_SRV_FORMAT,
 )
+from ms_active_directory import logging_utils
 
 
 logger = logging_utils.get_logger()

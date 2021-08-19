@@ -1,6 +1,6 @@
 import ipaddress
 
-import logging_utils
+from ms_active_directory import logging_utils
 
 from ldap3 import (
     KERBEROS,
@@ -8,12 +8,11 @@ from ldap3 import (
 )
 
 from ldap3.utils.dn import (
-    LDAPInvalidDnError,
     parse_dn,
 )
 
-from environment.ldap.ldap_format_utils import is_dn
-from exceptions import InvalidDomainParameterException
+from ms_active_directory.environment.ldap.ldap_format_utils import is_dn
+from ms_active_directory.exceptions import InvalidDomainParameterException
 
 
 logger = logging_utils.get_logger()

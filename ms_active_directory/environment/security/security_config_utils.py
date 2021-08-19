@@ -3,18 +3,18 @@ password and encryption types.
 """
 import random
 
-import logging_utils
+from ms_active_directory import logging_utils
 
 from typing import List
 
-from environment.security.security_config_constants import (
+from ms_active_directory.environment.security.security_config_constants import (
     AD_PASSWORD_CHAR_RANGE,
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
     ENCRYPTION_TYPE_VALUE_TO_ENUM,
     UNSUPPORTED_ENC_TYPES,
 )
-from exceptions import (
+from ms_active_directory.exceptions import (
     InvalidLdapParameterException,
     LdapResponseDecodeException,
 )
