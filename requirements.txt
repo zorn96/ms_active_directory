@@ -1,5 +1,5 @@
+# if you change something here, change the setup.py too
 dnspython>=2.1.0
-gssapi>=1.6
 ldap3>=2.8.0
 pyasn1>=0.4.6
 pycryptodome>=3.9.0
