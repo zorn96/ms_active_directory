@@ -10,6 +10,10 @@ It primarily builds on the LDAP protocol, and supports LDAP over TLS with channe
 and all LDAP basic, NTLM, and SASL authentication mechanisms supported by the `ldap3` python
 library.
 
+**Author**: Azaria Zornberg
+\
+**Email**: a.zornberg96@gmail.com
+
 
 # Examples
 
