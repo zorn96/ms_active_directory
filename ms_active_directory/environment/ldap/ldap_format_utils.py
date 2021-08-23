@@ -6,11 +6,16 @@ from ldap3.utils.dn import parse_dn
 from typing import List
 
 from ms_active_directory.environment.ldap.ldap_constants import (
+    ADObject,
     AD_USERNAME_RESTRICTED_CHARS,
     SAM_ACCOUNT_NAME_LENGTH,
     LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT,
 )
-from ms_active_directory.exceptions import InvalidDomainParameterException
+from ms_active_directory.exceptions import (
+    InvalidDomainParameterException,
+    InvalidLdapParameterException,
+    ObjectNotFoundException,
+)
 
 
 logger = logging_utils.get_logger()
@@ -125,6 +130,39 @@ def escape_dn_for_filter(anything: str):
         else:
             return char
     return "".join(escape_char(x) for x in anything)
+
+
+def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable):
+    """ Given a list of entities that might be AD objects or strings, return a map of LDAP distinguished names
+    for the entities.
+    """
+    # make a map of entity distinguished names to entities passed in. we'll use this when constructing
+    # our return dictionary as well
+    entity_dns = {}
+    for entity in entities:
+        if isinstance(entity, str):
+            if is_dn(entity):
+                # cast to lowercase for case-insensitive checks later
+                entity_dn = entity.lower()
+            elif lookup_by_name_fn is None:
+                raise InvalidLdapParameterException('If any entities are strings and are not distinguished names, '
+                                                    'a function must be provided to look up entities by name. '
+                                                    'Context: {}'.format(entity))
+            else:
+                entity_obj = lookup_by_name_fn(entity)
+                if entity_obj is None:
+                    raise ObjectNotFoundException('No entity could be found with name {}'.format(entity))
+                # cast to lowercase for case-insensitive checks later
+                entity_dn = entity_obj.distinguished_name.lower()
+        elif isinstance(entity, ADObject):
+            # cast to lowercase for case-insensitive checks later
+            entity_dn = entity.distinguished_name.lower()
+        else:
+            bad_type = type(entity)
+            raise InvalidLdapParameterException('All entities must either be ADObject objects or strings. {} was '
+                                                'of type {}'.format(entity, bad_type))
+        entity_dns[entity_dn] = entity
+    return entity_dns
 
 
 def normalize_object_location_in_domain(location: str, domain_dns_name: str):

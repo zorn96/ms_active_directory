@@ -56,6 +56,16 @@ class LdapResponseDecodeException(MsActiveDirectoryException):
         super().__init__(exception_str)
 
 
+class MembershipModificationException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
+class MembershipModificationRollbackException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class ObjectCreationException(MsActiveDirectoryException):
     def __init__(self, exception_str):
         super().__init__(exception_str)

@@ -22,9 +22,9 @@ from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser, ADObje
 from ms_active_directory.exceptions import (
     DomainSearchException,
     DuplicateNameException,
-    InvalidLdapParameterException,
+    MembershipModificationException,
+    MembershipModificationRollbackException,
     ObjectCreationException,
-    ObjectNotFoundException,
 )
 
 logger = logging_utils.get_logger()
@@ -720,27 +720,7 @@ class ADSession:
         """
         # make a map of entity distinguished names to entities passed in. we'll use this when constructing
         # our return dictionary as well
-        entity_dns = {}
-        for entity in entities:
-            if isinstance(entity, str):
-                if ldap_utils.is_dn(entity):
-                    entity_dn = entity
-                elif lookup_by_name_fn is None:
-                    raise InvalidLdapParameterException('If any entities are strings and are not distinguished names, '
-                                                        'a function must be provided to look up entities by name. '
-                                                        'Context: {}'.format(entity))
-                else:
-                    entity_obj = lookup_by_name_fn(entity)
-                    if entity_obj is None:
-                        raise ObjectNotFoundException('No entity could be found with name {}'.format(entity))
-                    entity_dn = entity_obj.distinguished_name
-            elif isinstance(entity, ADObject):
-                entity_dn = entity.distinguished_name
-            else:
-                bad_type = type(entity)
-                raise InvalidLdapParameterException('All entities must either be ADObject objects or strings. {} was '
-                                                    'of type {}'.format(entity, bad_type))
-            entity_dns[entity_dn] = entity
+        entity_dns = ldap_utils.normalize_entities_to_entity_dns(entities, lookup_by_name_fn)
 
         filter_pieces = []
         for entity_dn in entity_dns:
@@ -782,8 +762,10 @@ class ADSession:
         for result in results:
             # groups can have a lot of members. converting the member list to a set keeps
             # the checking of all input entities to O(n) instead of O(n^2) and keeps the total
-            # complexity of checking all input entities for all results to O(n^2) instead of O(n^3)
-            member_set = set(result.get(ldap_constants.AD_ATTRIBUTE_MEMBER))
+            # complexity of checking all input entities for all results to O(n^2) instead of O(n^3).
+            # cast all members to lowercase for a case-insensitive membership check. our normalization
+            # function gave use lowercase DNs
+            member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER))
             for entity_dn in entity_dns:
                 if entity_dn in member_set:
                     # get our input entity for the result dict
@@ -846,6 +828,103 @@ class ADSession:
         :raises: a InvalidLdapParameterException if any users are not a string or ADUser.
         """
         return self.find_groups_for_entities(users, attributes_to_lookup, self.find_user_by_name)
+
+    # FUNCTIONS FOR MODIFYING MEMBERSHIPS
+
+    def _something_members_to_or_from_groups(self, members: List, groups_to_modify: List,
+                                             member_lookup_fn: callable, stop_and_rollback_on_error: bool,
+                                             adding: bool):
+        """ Either add or remove members to/from groups. Members may be users or groups or string distinguished names.
+        If there are any failures adding/removing for a group, and stop_and_rollback_on_error is True, we will attempt
+        to undo the changes that have been done. If rollback fails, we will raise an exception. If it succeeds, we still
+        raise an exception, but of a different type.
+
+        If stop_and_rollback_on_error is False, we ignore failures and keep going.
+        We return a list of successfully modified groups at the end.
+        """
+        # figure out which function to use
+        member_modify_fn = self.ldap_connection.extend.microsoft.remove_members_from_groups
+        verb = 'remove'
+        if adding:
+            member_modify_fn = self.ldap_connection.extend.microsoft.add_members_to_groups
+            verb = 'add'
+
+        # normalize our inputs to get lists of lowercase dns
+        normalized_member_dns = ldap_utils.normalize_entities_to_entity_dns(members,
+                                                                            member_lookup_fn)
+        member_dn_list = list(normalized_member_dns.keys())
+        normalized_target_group_dns = ldap_utils.normalize_entities_to_entity_dns(groups_to_modify,
+                                                                                  self.find_group_by_name)
+        target_group_list = list(normalized_target_group_dns.keys())
+
+        # track successful groups in case we need to rollback, and rollback status
+        successful_groups = []
+        failing_group = None
+        for group_dn in target_group_list:
+            logger.info('Attempting to %s the following members to/from group %s : %s', verb, member_dn_list,
+                        group_dn)
+            # by setting fix to True, we ignore members already in the group and make this idempotent
+            res = member_modify_fn(member_dn_list, [group_dn], fix=True)
+            # the function returns a boolean on whether it succeeded or not
+            if not res:
+                failing_group = group_dn
+                logger.error('Failure occurred attempting to %s members to/from group %s', verb, group_dn)
+                if stop_and_rollback_on_error:
+                    if not successful_groups:
+                        logger.info('No successful groups to rollback')
+                        break
+                    logger.warning('Rolling back member %s operations to groups %s', verb, successful_groups)
+                    # reverse the operation
+                    new_op = not adding
+                    try:
+                        # don't attempt to rollback the rollback
+                        self._something_members_to_or_from_groups(member_dn_list, successful_groups, member_lookup_fn,
+                                                                  stop_and_rollback_on_error=False, adding=new_op)
+                    except MembershipModificationException:
+                        logger.error('Failed to completely rollback changes after failure. '
+                                     'Halting and raising exception')
+                        raise MembershipModificationRollbackException('Failed to modify group with distinguished name {} and rollback of '
+                                                                      'successful groups with distinguished names {} failed. Please check '
+                                                                      'the current state of those groups in AD before proceeding.'
+                                                                      .format(group_dn, successful_groups))
+                    logger.info('Successfully rolled back changes to %s', successful_groups)
+                    break
+                else:
+                    logger.warning('Continuing despite failure')
+            else:
+                successful_groups.append(group_dn)
+
+        # convert our successful groups into the input format before returning them
+        original_groups_that_succeeded = [normalized_target_group_dns[group] for group in successful_groups]
+        # raise an exception if we failed at all and wanted to stop and rollback
+        # if a rollback was requested, then we only reach this point if it succeeds (a rollback exception is raised
+        # if it fails), so raise an error declaring what failed and the fact that we rolled back
+        if failing_group is not None and stop_and_rollback_on_error:
+            raise MembershipModificationException('Failed to successfully update group {} to {} member. Rolled '
+                                                  'back changes to other groups.'.format(failing_group, verb))
+        return original_groups_that_succeeded
+
+    def add_groups_to_groups(self, groups_to_add: List, groups_to_add_them_to: List,
+                             stop_and_rollback_on_error: bool=True):
+        return self._something_members_to_or_from_groups(groups_to_add, groups_to_add_them_to, self.find_group_by_name,
+                                                         stop_and_rollback_on_error, adding=True)
+
+    def add_users_to_groups(self, users_to_add: List, groups_to_add_them_to: List,
+                            stop_and_rollback_on_error: bool=True):
+        return self._something_members_to_or_from_groups(users_to_add, groups_to_add_them_to, self.find_user_by_name,
+                                                         stop_and_rollback_on_error, adding=True)
+
+    def remove_groups_from_groups(self, groups_to_remove: List, groups_to_remove_them_from: List,
+                                  stop_and_rollback_on_error: bool=True):
+        return self._something_members_to_or_from_groups(groups_to_remove, groups_to_remove_them_from,
+                                                         self.find_group_by_name, stop_and_rollback_on_error,
+                                                         adding=False)
+
+    def remove_users_from_groups(self, users_to_remove: List, groups_to_remove_them_from: List,
+                                 stop_and_rollback_on_error: bool=True):
+        return self._something_members_to_or_from_groups(users_to_remove, groups_to_remove_them_from,
+                                                         self.find_user_by_name, stop_and_rollback_on_error,
+                                                         adding=False)
 
     def who_am_i(self):
         """ Return the authorization identity as recognized by the server.

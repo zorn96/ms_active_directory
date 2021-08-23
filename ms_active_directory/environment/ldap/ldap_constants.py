@@ -1,3 +1,4 @@
+import copy
 
 CERTIFICATE_AUTHORITY_OBJECT_CLASS = 'certificationAuthority'
 TRUSTED_DOMAIN_OBJECT_CLASS = 'TrustedDomain'
@@ -93,3 +94,32 @@ FIND_USER_FILTER = '(objectClass=User)'
 # miscellaneous values we need
 UNKNOWN_USER_POSIX_UID = -1
 UNKNOWN_GROUP_POSIX_GID = -1
+
+
+# the parent of all ADObjects, defined here to avoid risk of circular imports
+
+class ADObject:
+
+    def __init__(self, dn: str, attributes: dict, domain):
+        self.distinguished_name = dn
+        self.domain = domain
+        self.all_attributes = attributes if attributes else {}
+        # used for __repr__
+        self.class_name = 'ADObject'
+
+    def get(self, attribute_name: str, unpack_one_item_lists=False):
+        """ Get an attribute about the group that isn't explicitly tracked as a member """
+        val = self.all_attributes.get(attribute_name)
+        # there's a lot of 1-item lists from the ldap3 library
+        if isinstance(val, list) and len(val) == 1 and unpack_one_item_lists:
+            return copy.deepcopy(val[0])
+        return copy.deepcopy(val)
+
+    def __repr__(self):
+        attrs = self.all_attributes.__repr__() if self.all_attributes else 'None'
+        domain = self.domain.__repr__()
+        return ('{type}(dn={dn}, attributes={attrs}, domain={domain})'
+                .format(type=self.class_name, dn=self.distinguished_name, attrs=attrs, domain=domain))
+
+    def __str__(self):
+        return self.__repr__()
