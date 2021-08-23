@@ -21,6 +21,16 @@ class DomainSearchException(MsActiveDirectoryException):
         super().__init__(exception_str)
 
 
+class DuplicateNameException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
+class InformationUnavailableException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class InvalidComputerParameterException(MsActiveDirectoryException):
     def __init__(self, exception_str):
         super().__init__(exception_str)
@@ -47,5 +57,10 @@ class LdapResponseDecodeException(MsActiveDirectoryException):
 
 
 class ObjectCreationException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
+class ObjectNotFoundException(MsActiveDirectoryException):
     def __init__(self, exception_str):
         super().__init__(exception_str)

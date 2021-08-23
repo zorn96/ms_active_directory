@@ -2,6 +2,9 @@
 CERTIFICATE_AUTHORITY_OBJECT_CLASS = 'certificationAuthority'
 TRUSTED_DOMAIN_OBJECT_CLASS = 'TrustedDomain'
 COMPUTER_OBJECT_CLASS = 'computer'
+GROUP_OBJECT_CLASS = 'group'
+POSIX_GROUP_OBJECT_CLASS = 'posixGroup'
+POSIX_USER_OBJECT_CLASS = 'posixAccount'
 USER_OBJECT_CLASS = 'user'
 TOP_OBJECT_CLASS = 'top'
 # computers also have the user object class because they can act as users to operate
@@ -24,10 +27,22 @@ AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
 AD_ATTRIBUTE_COMMON_NAME = 'cn'
 AD_ATTRIBUTE_OBJECT_CLASS = 'objectClass'
 
-# keys for general user and computer attributes
+# keys for general user, group, and computer attributes
 AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'
 AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES = 'servicePrincipalName'
 AD_ATTRIBUTE_PASSWORD = 'unicodePwd'
+# memberOf is a virtual attribute on users and groups, listing the DNs of groups that the record
+# belongs to. it's less efficient to query because it's constructed on-demand in a lot of scenarios,
+# and so we don't query for it by default, but use it if a user does query for it
+AD_ATTRIBUTE_MEMBER_OF = 'memberOf'
+# member is an attribute on groups, listing the DNs of users or groups that belong to it.
+# it is part of the group record, so it's more efficient to query for and filter on
+AD_ATTRIBUTE_MEMBER = 'member'
+# posix attributes
+AD_ATTRIBUTE_UID_NUMBER = 'uidNumber'  # posix user uid (uid is user name for ldap, uidNumber is uid)
+AD_ATTRIBUTE_GID_NUMBER = 'gidNumber'  # posix group gid, or primary gid for user
+AD_ATTRIBUTE_UNIX_HOME_DIR = 'unixHomeDirectory'  # homedir for a posix user
+AD_ATTRIBUTE_UNIX_LOGIN_SHELL = 'loginShell'  # the login shell a user uses, e.g. /bin/bash, /bin/zsh
 
 # keys for attributes that are relatively computer-specific
 AD_ATTRIBUTE_ENCRYPTION_TYPES = 'msDS-SupportedEncryptionTypes'
@@ -74,3 +89,7 @@ DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
 FIND_ANYTHING_FILTER = '(objectClass=*)'
 FIND_GROUP_FILTER = '(objectClass=Group)'
 FIND_USER_FILTER = '(objectClass=User)'
+
+# miscellaneous values we need
+UNKNOWN_USER_POSIX_UID = -1
+UNKNOWN_GROUP_POSIX_GID = -1

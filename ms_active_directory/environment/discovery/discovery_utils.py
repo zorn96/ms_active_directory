@@ -75,8 +75,8 @@ def discover_kdc_domain_controllers_in_domain(domain: str, site: str=None, dns_n
     krb_srv = KERBEROS_DNS_SRV_FORMAT.format(domain=domain)
     if site:
         krb_srv = KERBEROS_SITE_AWARE_DNS_SRV_FORMAT.format(site=site, domain=domain)
-    all_ldap_records = _resolve_record_in_dns(krb_srv, SRV, dns_nameservers, source_ip)
-    return _order_kdcs_by_rtt(all_ldap_records, server_limit, source_ip)
+    all_kdc_records = _resolve_record_in_dns(krb_srv, SRV, dns_nameservers, source_ip)
+    return _order_kdcs_by_rtt(all_kdc_records, server_limit, source_ip)
 
 
 def _resolve_record_in_dns(record_name: str, record_type: RdataType, dns_nameservers: List[str], source_ip: str):
@@ -146,7 +146,7 @@ def _order_kdcs_by_rtt(kdc_server_records: List[tuple], server_limit: int, sourc
     for server_tuple in kdc_server_records:
         # we don't care about weight and priority anymore if ordering by RTT
         server_host, server_port, _, _ = server_tuple
-        fn = lambda: _check_kdc_availability_and_rtt(server_host, source_ip, server_port)
+        fn = lambda: _check_kdc_availability_and_rtt(server_host, server_port, source_ip)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'KDC', server_limit)
 
@@ -266,13 +266,13 @@ def _check_kdc_availability_and_rtt(server_host: str, server_port: str, source_i
                 return end - start, kdc_uri
             except socket.error:
                 logger.debug('KDC server %s was unreachable on port %s', server_host, server_port)
-                pass
             finally:
                 try:
                     temp_socket.shutdown(socket.SHUT_RDWR)
                     temp_socket.close()
                 except socket.error:
                     pass
-        except:
-            pass
+        except Exception:
+            logger.exception('Unexpected exception when checking connectivity to %s on port %s using source ip %s '
+                             'and temporary socket %s', server_host, server_port, source_ip, temp_socket)
     return None
