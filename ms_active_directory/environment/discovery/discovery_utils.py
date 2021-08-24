@@ -12,6 +12,7 @@ import ms_active_directory.environment.format_utils as format_utils
 # most of our time is spent waiting on replies, so we use a thread pool instead of a
 # process pool
 from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from dns.rdatatype import SRV, RdataType
 from ldap3 import Connection, Server, DSA
 from typing import List, Callable
@@ -143,7 +144,7 @@ def _order_ldap_servers_by_rtt(ldap_server_records: List[tuple], server_limit: i
             continue
         processed_host_port_tuples.add(host_port_tuple)
         # build our function for checking availability and round trip time
-        fn = lambda: _check_ldap_server_availability_and_rtt(server_host, server_port, source_ip, secure)
+        fn = partial(_check_ldap_server_availability_and_rtt, server_host, server_port, source_ip, secure)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'LDAP', server_limit)
 
@@ -168,7 +169,7 @@ def _order_kdcs_by_rtt(kdc_server_records: List[tuple], server_limit: int, sourc
             continue
         processed_host_port_tuples.add(host_port_tuple)
         # build our function for checking availability and round trip time
-        fn = lambda: _check_kdc_availability_and_rtt(server_host, server_port, source_ip)
+        fn = partial(_check_kdc_availability_and_rtt, server_host, server_port, source_ip)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'KDC', server_limit)
 
