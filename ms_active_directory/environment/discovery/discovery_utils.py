@@ -129,9 +129,20 @@ def _order_ldap_servers_by_rtt(ldap_server_records: List[tuple], server_limit: i
     trim the length based on our limit.
     """
     lookup_rtt_fns = []
+    processed_host_port_tuples = set()
     for server_tuple in ldap_server_records:
+        # windows AD when upgrading from 2008/2012 to 2016/2019 can end up with duplicate SRV records due to issues
+        # with case sensitivity in registering records. but DNS names ARE case insensitive.
+        # in case a domain's admin hasn't corrected these records, remove duplicates so that we don't waste time
+        # /end up with multiple duplicate URIs returned
+        # https://docs.microsoft.com/en-us/troubleshoot/windows-server/networking/dns-registers-duplicate-srv-records-for-dc
         # we don't care about weight and priority anymore if ordering by RTT
         server_host, server_port, _, _ = server_tuple
+        host_port_tuple = (server_host.lower(), server_port) # cast to lowercase for case insensitivity
+        if host_port_tuple in processed_host_port_tuples:
+            continue
+        processed_host_port_tuples.add(host_port_tuple)
+        # build our function for checking availability and round trip time
         fn = lambda: _check_ldap_server_availability_and_rtt(server_host, server_port, source_ip, secure)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'LDAP', server_limit)
@@ -143,9 +154,20 @@ def _order_kdcs_by_rtt(kdc_server_records: List[tuple], server_limit: int, sourc
     trim the length based on our limit.
     """
     lookup_rtt_fns = []
+    processed_host_port_tuples = set()
     for server_tuple in kdc_server_records:
+        # windows AD when upgrading from 2008/2012 to 2016/2019 can end up with duplicate SRV records due to issues
+        # with case sensitivity in registering records. but DNS names ARE case insensitive.
+        # in case a domain's admin hasn't corrected these records, remove duplicates so that we don't waste time
+        # /end up with multiple duplicate URIs returned
+        # https://docs.microsoft.com/en-us/troubleshoot/windows-server/networking/dns-registers-duplicate-srv-records-for-dc
         # we don't care about weight and priority anymore if ordering by RTT
         server_host, server_port, _, _ = server_tuple
+        host_port_tuple = (server_host.lower(), server_port) # cast to lowercase for case insensitivity
+        if host_port_tuple in processed_host_port_tuples:
+            continue
+        processed_host_port_tuples.add(host_port_tuple)
+        # build our function for checking availability and round trip time
         fn = lambda: _check_kdc_availability_and_rtt(server_host, server_port, source_ip)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'KDC', server_limit)
