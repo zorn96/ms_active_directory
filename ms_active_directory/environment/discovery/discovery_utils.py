@@ -75,8 +75,8 @@ def discover_kdc_domain_controllers_in_domain(domain: str, site: str=None, dns_n
     krb_srv = KERBEROS_DNS_SRV_FORMAT.format(domain=domain)
     if site:
         krb_srv = KERBEROS_SITE_AWARE_DNS_SRV_FORMAT.format(site=site, domain=domain)
-    all_ldap_records = _resolve_record_in_dns(krb_srv, SRV, dns_nameservers, source_ip)
-    return _order_kdcs_by_rtt(all_ldap_records, server_limit, source_ip)
+    all_kdc_records = _resolve_record_in_dns(krb_srv, SRV, dns_nameservers, source_ip)
+    return _order_kdcs_by_rtt(all_kdc_records, server_limit, source_ip)
 
 
 def _resolve_record_in_dns(record_name: str, record_type: RdataType, dns_nameservers: List[str], source_ip: str):
@@ -129,9 +129,20 @@ def _order_ldap_servers_by_rtt(ldap_server_records: List[tuple], server_limit: i
     trim the length based on our limit.
     """
     lookup_rtt_fns = []
+    processed_host_port_tuples = set()
     for server_tuple in ldap_server_records:
+        # windows AD when upgrading from 2008/2012 to 2016/2019 can end up with duplicate SRV records due to issues
+        # with case sensitivity in registering records. but DNS names ARE case insensitive.
+        # in case a domain's admin hasn't corrected these records, remove duplicates so that we don't waste time
+        # /end up with multiple duplicate URIs returned
+        # https://docs.microsoft.com/en-us/troubleshoot/windows-server/networking/dns-registers-duplicate-srv-records-for-dc
         # we don't care about weight and priority anymore if ordering by RTT
         server_host, server_port, _, _ = server_tuple
+        host_port_tuple = (server_host.lower(), server_port) # cast to lowercase for case insensitivity
+        if host_port_tuple in processed_host_port_tuples:
+            continue
+        processed_host_port_tuples.add(host_port_tuple)
+        # build our function for checking availability and round trip time
         fn = lambda: _check_ldap_server_availability_and_rtt(server_host, server_port, source_ip, secure)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'LDAP', server_limit)
@@ -143,10 +154,21 @@ def _order_kdcs_by_rtt(kdc_server_records: List[tuple], server_limit: int, sourc
     trim the length based on our limit.
     """
     lookup_rtt_fns = []
+    processed_host_port_tuples = set()
     for server_tuple in kdc_server_records:
+        # windows AD when upgrading from 2008/2012 to 2016/2019 can end up with duplicate SRV records due to issues
+        # with case sensitivity in registering records. but DNS names ARE case insensitive.
+        # in case a domain's admin hasn't corrected these records, remove duplicates so that we don't waste time
+        # /end up with multiple duplicate URIs returned
+        # https://docs.microsoft.com/en-us/troubleshoot/windows-server/networking/dns-registers-duplicate-srv-records-for-dc
         # we don't care about weight and priority anymore if ordering by RTT
         server_host, server_port, _, _ = server_tuple
-        fn = lambda: _check_kdc_availability_and_rtt(server_host, source_ip, server_port)
+        host_port_tuple = (server_host.lower(), server_port) # cast to lowercase for case insensitivity
+        if host_port_tuple in processed_host_port_tuples:
+            continue
+        processed_host_port_tuples.add(host_port_tuple)
+        # build our function for checking availability and round trip time
+        fn = lambda: _check_kdc_availability_and_rtt(server_host, server_port, source_ip)
         lookup_rtt_fns.append(fn)
     return _process_sort_return_rtt_ordering_results(lookup_rtt_fns, 'KDC', server_limit)
 
@@ -266,13 +288,13 @@ def _check_kdc_availability_and_rtt(server_host: str, server_port: str, source_i
                 return end - start, kdc_uri
             except socket.error:
                 logger.debug('KDC server %s was unreachable on port %s', server_host, server_port)
-                pass
             finally:
                 try:
                     temp_socket.shutdown(socket.SHUT_RDWR)
                     temp_socket.close()
                 except socket.error:
                     pass
-        except:
-            pass
+        except Exception:
+            logger.exception('Unexpected exception when checking connectivity to %s on port %s using source ip %s '
+                             'and temporary socket %s', server_host, server_port, source_ip, temp_socket)
     return None

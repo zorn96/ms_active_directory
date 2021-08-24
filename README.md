@@ -361,3 +361,261 @@ computer_name = 'workstation10'
 comp = domain.join(user, password, computer_hostnames=[computer_host1, computer_host2],
                    computer_services=services, computer_location=less_privileged_loc)
 ```
+
+# Managing users and groups
+
+The library provides a number of different functions for finding users and groups by different
+identifiers, and for querying information about them.
+It also has functions for checking their memberships and adding or removing users and groups
+to or from groups.
+
+## Looking up users, groups, and information about them
+
+Users and groups can both be looked up by one of:
+- sAMAccountName
+- distinguished name
+- common name
+- a generic "name" that will attempt the above 3
+- an attribute
+
+### Look up by sAMAccountName
+
+A `sAMAccountName` is unique within a domain, and so looking up users or
+groups by `sAMAccountName` returns a single result.
+`sAMAccountName` was a user's windows logon name in older versions of windows,
+and may be referred to as such in some documentation.
+
+When looking up users and groups, you can also query for additional information
+about them by specifying a list of LDAP attributes.
+``` 
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+user = session.find_user_by_sam_name('user1', ['employeeID'])
+group = session.find_group_by_sam_name('group1', ['gidNumber'])
+# users and groups support a generic "get" for any attributes queried
+print(user.get('employeeID'))
+print(group.get('gidNumber'))
+```
+
+### Look up by distinguished name
+
+A distinguished name is unique within a forest, and so looking up users or
+groups by it returns a single result.
+A distinguished name should not be escaped when provided to the search function.
+
+When looking up users and groups, you can also query for additional information
+about them by specifying a list of LDAP attributes.
+``` 
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+user_dn = 'CN=user one,CN=Users,DC=example,DC=com'
+user = session.find_user_by_distinguished_name(user_dn, ['employeeID'])
+group_dn = 'CN=group one,OU=employee-groups,DC=example,DC=com'
+group = session.find_group_by_distinguished_name(group_dn, ['gidNumber'])
+# users and groups support a generic "get" for any attributes queried
+print(user.get('employeeID'))
+print(group.get('gidNumber'))
+```
+
+### Look up by common name
+A common name is not unique within a domain, and so looking up users or
+groups by it returns a list of results, which may have 0 or more entries.
+
+When looking up users and groups, you can also query for additional information
+about them by specifying a list of LDAP attributes.
+``` 
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+user_cn = 'John Doe'
+users = session.find_users_by_common_name(user_cn, ['employeeID'])
+group_dn = 'operations managers'
+groups = session.find_groups_by_common_name(group_dn, ['gidNumber'])
+# users and groups support a generic "get" for any attributes queried
+for user in users:
+    print(user.get('employeeID'))
+for group in groups:
+    print(group.get('gidNumber'))
+```
+
+### Look up by generic name
+You can also query by a generic "name" and the library will attempt to find a
+unique user or group with that name. The library will either lookup by DN or will
+attempt `sAMAccountName` and common name lookups depending on the name format.
+
+If more than one result is found by common name and no result is found by
+`sAMAccountName` then this will produce an error.
+``` 
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+user_name = 'John Doe'
+user = session.find_user_by_name(user_name, ['employeeID'])
+group_name = 'operations managers'
+groups = session.find_groups_by_name(group_name, ['gidNumber'])
+# users and groups support a generic "get" for any attributes queried
+print(user.get('employeeID'))
+print(group.get('gidNumber'))
+```
+
+### Look up by attribute
+You can also query for users or groups that possess a certain value for a
+specified attribute. This can produce any number of results so a list is
+returned.
+``` 
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+desired_employee_type = 'temporary'
+users = session.find_users_by_attribute('employeeType', desired_employee_type, ['employeeID'])
+desired_group_manager = 'Alice P Hacker'
+groups = session.find_groups_by_attribute('managedBy', desired_group_manager, ['gidNumber'])
+
+# users and groups support a generic "get" for any attributes queried
+for user in users:
+    print(user.distinguished_name)
+    print(user.get('employeeID'))
+for group in groups:
+    print(group.distinguished_name)
+    print(group.get('gidNumber'))
+```
+
+## Querying user and group membership
+You can also look up the groups that a user belongs to, or the groups that a group belongs
+to. Active Directory supports nested groups, which is why there's both `user->groups` and
+`group->groups` mapping capability.
+
+When querying the membership information for users or groups, the input type for any
+user or group must either be a string name identifying the user or group as described in the prior
+section, or must be an `ADUser` or `ADGroup` object returned by one of the functions described
+in the prior section.
+
+Similarly to looking up users and groups, you can query for attributes of the parent groups
+by providing a list of LDAP attributes to look up for them.
+
+``` 
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+user_sam_account_name = 'user-sam-1'
+user_dn = 'CN=user sam 1,CN=users,DC=example,DC=com'
+user_cn = 'user same 1'
+
+desired_group_attrs = ['gidNumber', 'managedBy']
+# all 3 of these do the same thing, and internally map the different
+# name types to a user object
+groups_res1 = session.find_groups_for_user(user_sam_account_name, desired_group_attrs)
+groups_res2 = session.find_groups_for_user(user_dn, desired_group_attrs)
+groups_res3 = session.find_groups_for_user(user_cn, desired_group_attrs)
+
+# you can also directly use a user object to query groups
+user_obj = session.find_user_by_name(user_sam_account_name)
+groups_res4 = session.find_groups_for_user(user_obj, desired_group_attrs)
+
+# you can also look up the parents of groups in the same way
+example_group_obj = groups_res4[0]
+example_group_dn = example_group_obj.distinguished_name
+
+# these both work. sAMAccountName could also be used, etc.
+second_level_groups_res1 = session.find_groups_for_group(example_group_obj, desired_group_attrs)
+second_level_groups_res2 = session.find_groups_for_group(example_group_dn, desired_group_attrs)
+```
+
+You can also query `users->groups` and `groups->groups` to find the memberships of multiple
+users and groups, and the library will make a minimal number of queries to determine membership;
+it will be more efficient that doing a `user->groups` for each user (or similar for groups).
+The result will be a map that maps the input users or groups to lists of parent groups.
+
+The input lists' elements must be the same format as what's provided when looking up group
+memberships for a single user or group.
+``` 
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+user1_name = 'user1'
+user2_name = 'user2'
+users = [user1_name, user2_name]
+desired_group_attrs = ['gidNumber', 'managedBy']
+
+user_group_map = session.find_groups_for_users(users, desired_group_attrs)
+# the dictionary result keys are the users from the input
+user1_groups = user_group_map[user1_name]
+user2_groups = user_group_map[user2_name]
+
+# you can use the groups->groups mapping functionality to enumerate the
+# full tree of a users' group memberships (or a groups' group memberships)
+user1_second_level_groups_map = session.find_groups_for_groups(user1_groups, desired_group_attrs)
+all_second_level_groups = []
+for group_list in user1_second_level_groups_map.values():
+    for group in group_list:
+        if group not in all_second_level_groups:
+            all_second_level_groups.append(group)
+all_user1_groups_in_2_levels = user1_groups + all_second_level_groups
+```
+
+## Adding users to groups
+You can add users to groups by specifying a list of `ADUser` objects or string names of
+AD users to be added to the groups, and a list of `ADGroup` objects or string names of AD
+groups to add the users to.
+
+If string names are specified, they'll be mapped to users/groups using the functions
+discussed in the prior sections.
+
+If a user is already in a group, this is idempotent and will not re-add them.
+
+```
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+user1_name = 'user1'
+user2_name = 'user2'
+group1_name = 'target-group1'
+group2_name = 'target-group2'
+
+session.add_users_to_groups([user1_name, user2_name],
+                            [group1_name, group2_name])
+```
+
+By default, if we fail to add users to one of the groups specified, we'll attempt to rollback
+and remove users from any groups they were added to. You can choose to forgo this and a list of
+groups that users were successfully added to will be returned instead.
+``` 
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+user1_name = 'user1'
+user2_name = 'user2'
+group1_name = 'target-group1'
+group2_name = 'target-group2'
+privileged_group = 'group-that-will-fail'
+
+succeeeded = session.add_users_to_groups([user1_name, user2_name],
+                                         [group1_name, group2_name, privileged_group],
+                                         stop_and_rollback_on_error=False)
+# this will print "['target-group1', 'target-group2']" assuming that
+# adding users to 'group-that-will-fail' failed
+print(succeeeded)                                 
+```
+
+## Adding groups to groups
+
+Adding groups to other groups works exactly the same way as adding users to groups, but
+the function is called `add_groups_to_groups` and both inputs are lists of groups.
+
+## Removing users or groups from groups
+
+Removing users or groups from groups works identically to adding users or groups to groups,
+including input format, idempotency, and rollback functionality.
+The only difference is that the functions are called `remove_users_from_groups` and
+`remove_groups_from_groups` instead.

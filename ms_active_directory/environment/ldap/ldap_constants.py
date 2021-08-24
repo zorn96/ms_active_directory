@@ -1,7 +1,11 @@
+import copy
 
 CERTIFICATE_AUTHORITY_OBJECT_CLASS = 'certificationAuthority'
 TRUSTED_DOMAIN_OBJECT_CLASS = 'TrustedDomain'
 COMPUTER_OBJECT_CLASS = 'computer'
+GROUP_OBJECT_CLASS = 'group'
+POSIX_GROUP_OBJECT_CLASS = 'posixGroup'
+POSIX_USER_OBJECT_CLASS = 'posixAccount'
 USER_OBJECT_CLASS = 'user'
 TOP_OBJECT_CLASS = 'top'
 # computers also have the user object class because they can act as users to operate
@@ -24,10 +28,22 @@ AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
 AD_ATTRIBUTE_COMMON_NAME = 'cn'
 AD_ATTRIBUTE_OBJECT_CLASS = 'objectClass'
 
-# keys for general user and computer attributes
+# keys for general user, group, and computer attributes
 AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'
 AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES = 'servicePrincipalName'
 AD_ATTRIBUTE_PASSWORD = 'unicodePwd'
+# memberOf is a virtual attribute on users and groups, listing the DNs of groups that the record
+# belongs to. it's less efficient to query because it's constructed on-demand in a lot of scenarios,
+# and so we don't query for it by default, but use it if a user does query for it
+AD_ATTRIBUTE_MEMBER_OF = 'memberOf'
+# member is an attribute on groups, listing the DNs of users or groups that belong to it.
+# it is part of the group record, so it's more efficient to query for and filter on
+AD_ATTRIBUTE_MEMBER = 'member'
+# posix attributes
+AD_ATTRIBUTE_UID_NUMBER = 'uidNumber'  # posix user uid (uid is user name for ldap, uidNumber is uid)
+AD_ATTRIBUTE_GID_NUMBER = 'gidNumber'  # posix group gid, or primary gid for user
+AD_ATTRIBUTE_UNIX_HOME_DIR = 'unixHomeDirectory'  # homedir for a posix user
+AD_ATTRIBUTE_UNIX_LOGIN_SHELL = 'loginShell'  # the login shell a user uses, e.g. /bin/bash, /bin/zsh
 
 # keys for attributes that are relatively computer-specific
 AD_ATTRIBUTE_ENCRYPTION_TYPES = 'msDS-SupportedEncryptionTypes'
@@ -74,3 +90,36 @@ DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
 FIND_ANYTHING_FILTER = '(objectClass=*)'
 FIND_GROUP_FILTER = '(objectClass=Group)'
 FIND_USER_FILTER = '(objectClass=User)'
+
+# miscellaneous values we need
+UNKNOWN_USER_POSIX_UID = -1
+UNKNOWN_GROUP_POSIX_GID = -1
+
+
+# the parent of all ADObjects, defined here to avoid risk of circular imports
+
+class ADObject:
+
+    def __init__(self, dn: str, attributes: dict, domain):
+        self.distinguished_name = dn
+        self.domain = domain
+        self.all_attributes = attributes if attributes else {}
+        # used for __repr__
+        self.class_name = 'ADObject'
+
+    def get(self, attribute_name: str, unpack_one_item_lists=False):
+        """ Get an attribute about the group that isn't explicitly tracked as a member """
+        val = self.all_attributes.get(attribute_name)
+        # there's a lot of 1-item lists from the ldap3 library
+        if isinstance(val, list) and len(val) == 1 and unpack_one_item_lists:
+            return copy.deepcopy(val[0])
+        return copy.deepcopy(val)
+
+    def __repr__(self):
+        attrs = self.all_attributes.__repr__() if self.all_attributes else 'None'
+        domain = self.domain.__repr__()
+        return ('{type}(dn={dn}, attributes={attrs}, domain={domain})'
+                .format(type=self.class_name, dn=self.distinguished_name, attrs=attrs, domain=domain))
+
+    def __str__(self):
+        return self.__repr__()

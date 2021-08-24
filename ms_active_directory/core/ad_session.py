@@ -18,10 +18,13 @@ import ms_active_directory.environment.security.security_config_utils as securit
 import ms_active_directory.environment.security.security_config_constants as security_constants
 
 from ms_active_directory.core.ad_computer import ADComputer
-from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser
+from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser, ADObject
 from ms_active_directory.exceptions import (
+    DomainSearchException,
+    DuplicateNameException,
+    MembershipModificationException,
+    MembershipModificationRollbackException,
     ObjectCreationException,
-    DomainSearchException
 )
 
 logger = logging_utils.get_logger()
@@ -34,6 +37,11 @@ class ADSession:
         self.domain = domain
         self.domain_dns_name = self.domain.get_domain_dns_name()
         self.domain_search_base = ldap_utils.construct_ldap_base_dn_from_domain(self.domain_dns_name)
+        # when checking whether we can create something within the domain, we check for sAMAccountName conflicts
+        # and other conflicts depending on what's being created. when doing that validation we should always use
+        # the plain domain base, whereas users might confine self.domain_search_base later to perform lookups
+        # in a subsection of the domain
+        self._domain_validation_search_base = self.domain_search_base
 
     def is_authenticated(self):
         """ Returns if the session is currently authenticated """
@@ -70,6 +78,24 @@ class ADSession:
     def get_domain_dns_name(self):
         """ Returns the domain that this session is connected to """
         return self.domain_dns_name
+
+    def get_domain_search_base(self):
+        """ Returns the LDAP search base used for all 'find' functions as the search base """
+        return self.domain_search_base
+
+    def set_domain_search_base(self, search_base: str):
+        """ Set the search base to use for 'find' queries within the domain made by this session.
+        This can be used to confine our search to a sub-container within the domain. This can improve
+        the performance of lookups, avoid permissioning issues, and remove issues around duplicate
+        records with the same common name.
+        """
+        # an empty string search base is a special search base and shouldn't be normalized
+        if search_base != '':
+            normalized_rdn = ldap_utils.normalize_object_location_in_domain(search_base,
+                                                                            self.domain_dns_name)
+            # always use the base 'DC=...,DC=...' for our normalization
+            search_base = normalized_rdn + ',' + self._domain_validation_search_base
+        self.domain_search_base = search_base
 
     def dn_exists_in_domain(self, distinguished_name: str):
         """ Check if a distinguished name exists within the domain, regardless of what it is.
@@ -261,6 +287,8 @@ class ADSession:
         """
         raise NotImplementedError()
 
+    # FUNCTIONS FOR FINDING DOMAIN INFORMATION
+
     def is_domain_close_in_time_to_localhost(self, allowed_drift_seconds=None):
         """ Get whether the domain time is close to the current local time.
         Just calls the parent domain function and returns that. This is included here for completeness.
@@ -391,8 +419,10 @@ class ADSession:
         """
         return self.domain.find_supported_sasl_mechanisms(self.ldap_connection)
 
-    def _find_user_or_group_and_attrs(self, search_base: str, search_filter:str, search_scope: str,
-                                      attributes: List[str], size_limit: int, return_type):
+    # FUNCTIONS FOR FINDING USERS AND GROUPS
+
+    def _find_ad_objects_and_attrs(self, search_base: str, search_filter:str, search_scope: str,
+                                   attributes: List[str], size_limit: int, return_type):
         """ A helper function for common search and result parsing logic in other find functions for users
         and groups
         """
@@ -414,6 +444,60 @@ class ADSession:
             results.append(obj)
         return results
 
+    def find_objects_with_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None,
+                                    object_class: str=None, return_type=None):
+        """ Find all AD objects that possess the specified attribute with the specified value and return them.
+
+        :param attribute_name: The LDAP name of the attribute to be used in the search.
+        :param attribute_value: The value that returned objects should possess for the attribute.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
+                                     what's specified, the groups' name and object class attributes will be queried.
+        :param object_class: Optional. The object class to filter on when searching. Defaults to 'top' which will
+                             include all objects in AD.
+        :param return_type: Optional. The class to use to represent the returned objects. Defaults to ADObject.
+                            If a generic search is being done, or an object class is used that is not yet supported
+                            by this library, using ADObject is recommended.
+        :returns: a list of ADGroup objects representing groups with the specified value for the specified attribute.
+        """
+        if return_type is None:
+            return_type = ADObject
+        if object_class is None:
+            # top is the top level object class that all objects possess. it's as generic as you can get
+            object_class = ldap_constants.TOP_OBJECT_CLASS
+
+        # if our attribute value looks like a DN, escape it like one. otherwise, escape normally
+        if ldap_utils.is_dn(attribute_value):
+            escaped_val = ldap_utils.escape_dn_for_filter(attribute_value)
+        else:
+            escaped_val = ldap_utils.escape_generic_filter_value(attribute_value)
+        search_filter = ('(&({obj_class_attr}={obj_class})({attr}={attr_val}))'
+                         .format(obj_class_attr=ldap_constants.AD_ATTRIBUTE_OBJECT_CLASS,
+                                 obj_class=object_class, attr=attribute_name,
+                                 attr_val=escaped_val))
+        # at a minimum, always look up the thing we're filtering on
+        if attributes_to_lookup is None:
+            attributes_to_lookup = [attribute_name]
+        if attribute_name not in attributes_to_lookup:
+            attributes_to_lookup.append(attribute_name)
+        # a size limit of 0 means unlimited
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 0, return_type)
+        logger.info('%s %s objects found with %s value %s', len(res), object_class, attribute_name, attribute_value)
+        return res
+
+    def find_groups_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None):
+        """ Find all groups that possess the specified attribute with the specified value, and return a list of ADGroup
+        objects.
+
+        :param attribute_name: The LDAP name of the attribute to be used in the search.
+        :param attribute_value: The value that returned groups should possess for the attribute.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
+                                     what's specified, the groups' name and object class attributes will be queried.
+        :returns: a list of ADGroup objects representing groups with the specified value for the specified attribute.
+        """
+        return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup,
+                                                ldap_constants.GROUP_OBJECT_CLASS, ADGroup)
+
     def find_groups_by_common_name(self, group_name: str, attributes_to_lookup: List[str]=None):
         """ Find all groups with a given common name and return a list of ADGroup objects.
         This is particularly useful when you have multiple groups with the same name in different OUs
@@ -429,8 +513,8 @@ class ADSession:
                                                                   cn=group_name,
                                                                   type_filter=ldap_constants.FIND_GROUP_FILTER)
         # a size limit of 0 means unlimited
-        res = self._find_user_or_group_and_attrs(self.domain_search_base, search_filter, SUBTREE,
-                                                 attributes_to_lookup, 0, ADGroup)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 0, ADGroup)
         logger.info('%s groups found with common name %s', len(res), group_name)
         return res
 
@@ -447,29 +531,54 @@ class ADSession:
         normalized_rdn = ldap_utils.normalize_object_location_in_domain(group_dn,
                                                                         self.domain_dns_name)
         search_dn = normalized_rdn + ',' + self.domain_search_base
-        res = self._find_user_or_group_and_attrs(search_dn, ldap_constants.FIND_GROUP_FILTER, BASE,
-                                                 attributes_to_lookup, 1, ADGroup)
+        res = self._find_ad_objects_and_attrs(search_dn, ldap_constants.FIND_GROUP_FILTER, BASE,
+                                              attributes_to_lookup, 1, ADGroup)
         if not res:
             return None
         return res[0]
 
-    def find_group_by_sam_name(self, group_name, attributes_to_lookup=None):
+    def find_group_by_sam_name(self, group_name: str, attributes_to_lookup: List[str]=None):
         """ Find a Group in AD based on a specified sAMAccountName name and return it along with any
         requested attributes.
         :param group_name: The sAMAccountName name of the group.
         :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
-                                     what's specified, the user's name and object class attributes will be queried.
-        :returns: an ADGroup object or None if the user does not exist.
+                                     what's specified, the group's name and object class attributes will be queried.
+        :returns: an ADGroup object or None if the group does not exist.
         """
         # build a compound filter for users with this samaccountname
         search_filter = '(&({sam_attr}={sam_name}){type_filter})'.format(sam_attr=ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME,
                                                                          sam_name=group_name,
                                                                          type_filter=ldap_constants.FIND_GROUP_FILTER)
-        res = self._find_user_or_group_and_attrs(self.domain_search_base, search_filter, SUBTREE,
-                                                 attributes_to_lookup, 1, ADGroup)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 1, ADGroup)
         if not res:
             return None
         return res[0]
+
+    def find_group_by_name(self, group_name: str, attributes_to_lookup: List[str]=None):
+        """ Find a Group in AD based on a provided name.
+        This function takes in a generic name which can be either a distinguished name, a common name, or a
+        sAMAccountName, and tries to find a unique group identified by it and return information on the group.
+        :param group_name: The name of the group, which may be a DN, common name, or sAMAccountName.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
+                                     what's specified, the group's name and object class attributes will be queried.
+        :returns: an ADGroup object or None if the group does not exist.
+        :raises: a DuplicateNameException if more than one entry exists with this name.
+        """
+        return self._find_by_name_common(group_name, attributes_to_lookup, is_user=False)
+
+    def find_users_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None):
+        """ Find all users that possess the specified attribute with the specified value, and return a list of ADUser
+        objects.
+
+        :param attribute_name: The LDAP name of the attribute to be used in the search.
+        :param attribute_value: The value that returned groups should possess for the attribute.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the users. Regardless of
+                                     what's specified, the users' name and object class attributes will be queried.
+        :returns: a list of ADUser objects representing groups with the specified value for the specified attribute.
+        """
+        return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup,
+                                                ldap_constants.USER_OBJECT_CLASS, ADUser)
 
     def find_users_by_common_name(self, user_name: str, attributes_to_lookup: List[str]=None):
         """ Find all users with a given common name and return a list of ADUser objects.
@@ -486,8 +595,8 @@ class ADSession:
                                                                   cn=user_name,
                                                                   type_filter=ldap_constants.FIND_USER_FILTER)
         # a size limit of 0 means unlimited
-        res = self._find_user_or_group_and_attrs(self.domain_search_base, search_filter, SUBTREE,
-                                                 attributes_to_lookup, 0, ADUser)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 0, ADUser)
         logger.info('%s users found with common name %s', len(res), user_name)
         return res
 
@@ -504,8 +613,8 @@ class ADSession:
         normalized_rdn = ldap_utils.normalize_object_location_in_domain(user_dn,
                                                                         self.domain_dns_name)
         search_dn = normalized_rdn + ',' + self.domain_search_base
-        res = self._find_user_or_group_and_attrs(search_dn, ldap_constants.FIND_USER_FILTER, BASE,
-                                                 attributes_to_lookup, 1, ADUser)
+        res = self._find_ad_objects_and_attrs(search_dn, ldap_constants.FIND_USER_FILTER, BASE,
+                                              attributes_to_lookup, 1, ADUser)
         if not res:
             return None
         return res[0]
@@ -522,19 +631,314 @@ class ADSession:
         search_filter = '(&({sam_attr}={sam_name}){type_filter})'.format(sam_attr=ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME,
                                                                          sam_name=user_name,
                                                                          type_filter=ldap_constants.FIND_USER_FILTER)
-        res = self._find_user_or_group_and_attrs(self.domain_search_base, search_filter, SUBTREE,
-                                                 attributes_to_lookup, 1, ADUser)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 1, ADUser)
         if not res:
             return None
         return res[0]
+
+    def find_user_by_name(self, user_name: str, attributes_to_lookup: List[str]=None):
+        """ Find a User in AD based on a provided name.
+        This function takes in a generic name which can be either a distinguished name, a common name, or a
+        sAMAccountName, and tries to find a unique user identified by it and return information on the user.
+        :param user_name: The name of the user, which may be a DN, common name, or sAMAccountName.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the user. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :returns: an ADUser object or None if the user does not exist.
+        :raises: a DuplicateNameException if more than one entry exists with this name.
+        """
+        return self._find_by_name_common(user_name, attributes_to_lookup, is_user=True)
+
+    def _find_by_name_common(self, name: str, attributes_to_lookup: List[str], is_user: bool=True):
+        """ A helper function to find things by a unique name.
+        Depending on the type of object, it first checks if the name is a DN. We then perform
+        the appropriate lookup by DN if it is. Otherwise, we first try a lookup by sAMAccountName;
+        if that works we return that. If it doesn't, we try a lookup by common name. If that finds
+        1 result, we return it. Otherwise, we raise a duplicate name error.
+        """
+        is_dn = ldap_utils.is_dn(name)
+        dn_lookup_func = self.find_group_by_distinguished_name
+        sam_lookup_func = self.find_group_by_sam_name
+        cn_lookup_func = self.find_groups_by_common_name
+        if is_user:
+            dn_lookup_func = self.find_user_by_distinguished_name
+            sam_lookup_func = self.find_user_by_sam_name
+            cn_lookup_func = self.find_users_by_common_name
+
+        if is_dn:
+            return dn_lookup_func(name, attributes_to_lookup)
+        res = sam_lookup_func(name, attributes_to_lookup)
+        if res:
+            return res
+        result_list = cn_lookup_func(name, attributes_to_lookup)
+        if not result_list:
+            return None
+        if len(result_list) > 1:
+            insert = 'user' if is_user else 'group'
+            raise DuplicateNameException('Multiple {}s found with name "{}". Please either repeat the search '
+                                         'using a distinguished name or sAMAccountName, or adjust the session '
+                                         'search base using set_domain_search_base to limit searches such that only '
+                                         'one result is found. Alternatively you may perform a lookup by common name '
+                                         'and select which {} entry you want to use from multiple.'
+                                         .format(insert, name, insert))
+        return result_list[0]
 
     def _figure_out_search_attributes_for_user_or_group(self, attributes_to_lookup):
         """ There's some attributes we'll always get for users and groups, whether callers requested them or not.
         This combines those with any requested attributes
         """
-        base_group_attrs = {ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, ldap_constants.AD_ATTRIBUTE_OBJECT_CLASS,
-                            ldap_constants.AD_ATTRIBUTE_COMMON_NAME}
+        base_attrs = {ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, ldap_constants.AD_ATTRIBUTE_OBJECT_CLASS,
+                      ldap_constants.AD_ATTRIBUTE_COMMON_NAME}
         if attributes_to_lookup:
-            base_group_attrs.update(set(base_group_attrs))
+            base_attrs.update(set(attributes_to_lookup))
         # sort for reproducibility in eventual testing
-        return sorted(list(base_group_attrs))
+        return sorted(list(base_attrs))
+
+    # FUNCTIONS FOR FINDING MEMBERSHIP INFORMATION
+
+    def find_groups_for_entities(self, entities: List, attributes_to_lookup: List[str]=None,
+                                 lookup_by_name_fn: callable=None):
+        """ Find the parent groups for all of the entities in a List.
+        These entities may be users, groups, or anything really because Active Directory uses the "groupOfNames" style
+        membership tracking, so all group members are just represented as distinguished names regardless of type.
+        If the elements of entities are strings and are not distinguished names, then lookup_by_name_fn will be used
+        to look up the appropriate ADObject for the entity and get its distinguished name.
+
+        The parent groups of all the entities will then be queried, and the attributes specified will be looked up
+        (if any). A dictionary mapping the original entities to lists of ADGroup objects will be returned.
+
+        :param entities: A list of either ADObject objects or strings. These represent the objects whose parent groups
+                         are being queried.
+        :param attributes_to_lookup: A list of LDAP attributes to query about the parent groups, in addition to the
+                                     default ones queries. Optional.
+        :param lookup_by_name_fn: An optional function to call to map entities to ADObjects when the members of entities
+                                  are strings that are not LDAP distinguished names.
+        :returns: A dictionary mapping input entities to lists of ADGroup object representing their parent groups.
+        :raises: a DuplicateNameException if an entity name is specified and more than one entry exists with the name.
+        :raises: InvalidLdapParameterException if any non-string non-ADObject types are found in entities, or if any
+                 non-distinguished name strings are specified.
+        """
+        # make a map of entity distinguished names to entities passed in. we'll use this when constructing
+        # our return dictionary as well
+        entity_dns = ldap_utils.normalize_entities_to_entity_dns(entities, lookup_by_name_fn)
+
+        filter_pieces = []
+        for entity_dn in entity_dns:
+            filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_MEMBER,
+                                            ldap_utils.escape_dn_for_filter(entity_dn))
+            filter_pieces.append(filter_piece)
+        all_member_filters = ''.join(filter_pieces)
+        # this filter can get really really big, because DNs are long and we can have a lot of entities.
+        # AD does have a limit on request size; that limit is huge by default though - 10MB - and can be raised
+        # https://docs.microsoft.com/en-us/previous-versions/windows/it-pro/windows-server-2003/cc755809(v=ws.10)
+        chain_filter = ('(&({obj_cls_attr}={obj_cls})(|{member_filters}))'
+                        .format(obj_cls_attr=ldap_constants.AD_ATTRIBUTE_OBJECT_CLASS,
+                                obj_cls=ldap_constants.GROUP_OBJECT_CLASS,
+                                member_filters=all_member_filters))
+        filter_length = len(chain_filter)
+        logger.info('Querying parent groups of %s entitites using a filter of length %s',
+                    len(entities), filter_length)
+        # if our filter is more than 95% of the default limit, log at a warning level to make debugging issues easier
+        if filter_length > 10000000:
+            logger.warning('Filter length exceeds 95% of the DEFAULT active directory limit on request size, so this '
+                           'request may be rejected, in which case you should re-attempt with fewer entities in '
+                           'batches', filter_length)
+
+        # make sure member is included in our results
+        if attributes_to_lookup is None or attributes_to_lookup is []:
+            attributes_to_lookup = []
+        if ldap_constants.AD_ATTRIBUTE_MEMBER not in attributes_to_lookup:
+            attributes_to_lookup.append(ldap_constants.AD_ATTRIBUTE_MEMBER)
+        # look up our results
+        results = self._find_ad_objects_and_attrs(self.domain_search_base, chain_filter, SUBTREE,
+                                                  attributes_to_lookup, 0, ADGroup)
+        logger.info('Found %s unique parent groups across all %s entities', len(results), len(entities))
+        mapping_dict = {}
+        for entity in entities:
+            mapping_dict[entity] = []
+
+        # go over our results and for each one, figure out which input entities have the group as a parent
+        # (multiple entities could share parents)
+        for result in results:
+            # groups can have a lot of members. converting the member list to a set keeps
+            # the checking of all input entities to O(n) instead of O(n^2) and keeps the total
+            # complexity of checking all input entities for all results to O(n^2) instead of O(n^3).
+            # cast all members to lowercase for a case-insensitive membership check. our normalization
+            # function gave use lowercase DNs
+            member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER))
+            for entity_dn in entity_dns:
+                if entity_dn in member_set:
+                    # get our input entity for the result dict
+                    entity = entity_dns[entity_dn]
+                    mapping_dict[entity].append(result)
+        return mapping_dict
+
+    def find_groups_for_group(self, group, attributes_to_lookup: List[str]=None):
+        """ Find the groups that a group belongs to, look up attributes of theirs, and return information about them.
+
+        :param group: The group to lookup group memberships for. This can either be an ADGroup or a string name of an
+                      AD group. If it is a string, the group will be looked up first to get unique distinguished name
+                      information about it unless it is a distinguished name.
+        :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
+        :returns: A list of ADGroup objects representing the groups that this group belongs to.
+        :raises: a DuplicateNameException if a group name is specified and more than one entry exists with the name.
+        :raises: a InvalidLdapParameterException if the group name is not a string or ADGroup.
+        """
+        result_dict = self.find_groups_for_entities([group], attributes_to_lookup, self.find_group_by_name)
+        return result_dict[group]
+
+    def find_groups_for_groups(self, groups: List, attributes_to_lookup: List[str]=None):
+        """ Find the groups that a list of groups belong to, look up attributes of theirs, and return information about
+        them.
+
+        :param groups: The groups to lookup group memberships for. This can be a list of either ADGroup objects or
+                       string names of AD groups. If they are strings, the groups will be looked up first to get unique
+                       distinguished name information about them unless they are distinguished names.
+        :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
+        :returns: A dictionary mapping groups to lists of ADGroup objects representing the groups that they belong to.
+        :raises: a DuplicateNameException if a group name is specified and more than one entry exists with the name.
+        :raises: a InvalidLdapParameterException if any groups are not a string or ADGroup.
+        """
+        return self.find_groups_for_entities(groups, attributes_to_lookup, self.find_group_by_name)
+
+    def find_groups_for_user(self, user, attributes_to_lookup: List[str]=None):
+        """ Find the groups that a user belongs to, look up attributes of theirs, and return information about them.
+
+        :param user: The user to lookup group memberships for. This can either be an ADUser or a string name of an
+                     AD user. If it is a string, the user will be looked up first to get unique distinguished name
+                     information about it unless it is a distinguished name.
+        :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
+        :returns: A list of ADGroup objects representing the groups that this user belongs to.
+        :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
+        :raises: a InvalidLdapParameterException if the yser name is not a string or ADUser.
+        """
+        result_dict = self.find_groups_for_entities([user], attributes_to_lookup, self.find_user_by_name)
+        return result_dict[user]
+
+    def find_groups_for_users(self, users: List, attributes_to_lookup: List[str]=None):
+        """ Find the groups that a list of users belong to, look up attributes of theirs, and return information about
+        them.
+
+        :param users: The users to lookup group memberships for. This can be a list of either ADUser objects or
+                      string names of AD users. If they are strings, the users will be looked up first to get unique
+                      distinguished name information about them unless they are distinguished names.
+        :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
+        :returns: A dictionary mapping users to lists of ADGroup objects representing the groups that they belong to.
+        :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
+        :raises: a InvalidLdapParameterException if any users are not a string or ADUser.
+        """
+        return self.find_groups_for_entities(users, attributes_to_lookup, self.find_user_by_name)
+
+    # FUNCTIONS FOR MODIFYING MEMBERSHIPS
+
+    def _something_members_to_or_from_groups(self, members: List, groups_to_modify: List,
+                                             member_lookup_fn: callable, stop_and_rollback_on_error: bool,
+                                             adding: bool):
+        """ Either add or remove members to/from groups. Members may be users or groups or string distinguished names.
+        If there are any failures adding/removing for a group, and stop_and_rollback_on_error is True, we will attempt
+        to undo the changes that have been done. If rollback fails, we will raise an exception. If it succeeds, we still
+        raise an exception, but of a different type.
+
+        If stop_and_rollback_on_error is False, we ignore failures and keep going.
+        We return a list of successfully modified groups at the end.
+        """
+        # figure out which function to use
+        member_modify_fn = self.ldap_connection.extend.microsoft.remove_members_from_groups
+        verb = 'remove'
+        if adding:
+            member_modify_fn = self.ldap_connection.extend.microsoft.add_members_to_groups
+            verb = 'add'
+
+        # normalize our inputs to get lists of lowercase dns
+        normalized_member_dns = ldap_utils.normalize_entities_to_entity_dns(members,
+                                                                            member_lookup_fn)
+        member_dn_list = list(normalized_member_dns.keys())
+        normalized_target_group_dns = ldap_utils.normalize_entities_to_entity_dns(groups_to_modify,
+                                                                                  self.find_group_by_name)
+        target_group_list = list(normalized_target_group_dns.keys())
+
+        # track successful groups in case we need to rollback, and rollback status
+        successful_groups = []
+        failing_group = None
+        for group_dn in target_group_list:
+            logger.info('Attempting to %s the following members to/from group %s : %s', verb, member_dn_list,
+                        group_dn)
+            # by setting fix to True, we ignore members already in the group and make this idempotent
+            res = member_modify_fn(member_dn_list, [group_dn], fix=True)
+            # the function returns a boolean on whether it succeeded or not
+            if not res:
+                failing_group = group_dn
+                logger.error('Failure occurred attempting to %s members to/from group %s', verb, group_dn)
+                if stop_and_rollback_on_error:
+                    if not successful_groups:
+                        logger.info('No successful groups to rollback')
+                        break
+                    logger.warning('Rolling back member %s operations to groups %s', verb, successful_groups)
+                    # reverse the operation
+                    new_op = not adding
+                    try:
+                        # don't attempt to rollback the rollback
+                        self._something_members_to_or_from_groups(member_dn_list, successful_groups, member_lookup_fn,
+                                                                  stop_and_rollback_on_error=False, adding=new_op)
+                    except MembershipModificationException:
+                        logger.error('Failed to completely rollback changes after failure. '
+                                     'Halting and raising exception')
+                        raise MembershipModificationRollbackException('Failed to modify group with distinguished name {} and rollback of '
+                                                                      'successful groups with distinguished names {} failed. Please check '
+                                                                      'the current state of those groups in AD before proceeding.'
+                                                                      .format(group_dn, successful_groups))
+                    logger.info('Successfully rolled back changes to %s', successful_groups)
+                    break
+                else:
+                    logger.warning('Continuing despite failure')
+            else:
+                successful_groups.append(group_dn)
+
+        # convert our successful groups into the input format before returning them
+        original_groups_that_succeeded = [normalized_target_group_dns[group] for group in successful_groups]
+        # raise an exception if we failed at all and wanted to stop and rollback
+        # if a rollback was requested, then we only reach this point if it succeeds (a rollback exception is raised
+        # if it fails), so raise an error declaring what failed and the fact that we rolled back
+        if failing_group is not None and stop_and_rollback_on_error:
+            raise MembershipModificationException('Failed to successfully update group {} to {} member. Rolled '
+                                                  'back changes to other groups.'.format(failing_group, verb))
+        return original_groups_that_succeeded
+
+    def add_groups_to_groups(self, groups_to_add: List, groups_to_add_them_to: List,
+                             stop_and_rollback_on_error: bool=True):
+        return self._something_members_to_or_from_groups(groups_to_add, groups_to_add_them_to, self.find_group_by_name,
+                                                         stop_and_rollback_on_error, adding=True)
+
+    def add_users_to_groups(self, users_to_add: List, groups_to_add_them_to: List,
+                            stop_and_rollback_on_error: bool=True):
+        return self._something_members_to_or_from_groups(users_to_add, groups_to_add_them_to, self.find_user_by_name,
+                                                         stop_and_rollback_on_error, adding=True)
+
+    def remove_groups_from_groups(self, groups_to_remove: List, groups_to_remove_them_from: List,
+                                  stop_and_rollback_on_error: bool=True):
+        return self._something_members_to_or_from_groups(groups_to_remove, groups_to_remove_them_from,
+                                                         self.find_group_by_name, stop_and_rollback_on_error,
+                                                         adding=False)
+
+    def remove_users_from_groups(self, users_to_remove: List, groups_to_remove_them_from: List,
+                                 stop_and_rollback_on_error: bool=True):
+        return self._something_members_to_or_from_groups(users_to_remove, groups_to_remove_them_from,
+                                                         self.find_user_by_name, stop_and_rollback_on_error,
+                                                         adding=False)
+
+    def who_am_i(self):
+        """ Return the authorization identity as recognized by the server.
+        This can be helpful when a script is provided with an identity in one form that is used to start a session
+        (e.g. a distinguished name, or a pre-populated kerberos cache) and then it wants to determine its identity
+        that the server actually sees.
+        This just calls the LDAP connection function, as it's suitable for AD as well.
+        """
+        return self.ldap_connection.extend.standard.who_am_i()
+
+    def __repr__(self):
+        conn_repr = self.ldap_connection.__repr__()
+        domain_repr = self.domain.__repr__()
+        return 'ADSession(ldap_connection={}, domain={})'.format(conn_repr, domain_repr)
+
+    def __str__(self):
+        return self.__repr__()

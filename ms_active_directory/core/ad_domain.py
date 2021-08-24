@@ -1,4 +1,5 @@
 import copy
+import json
 import pytz
 import socket
 
@@ -342,7 +343,9 @@ class ADDomain:
         servers to be added.
         """
         ldap_uris = discover_ldap_domain_controllers_in_domain(self.domain, site=self.site,
-                                                               secure=self.encrypt_connections)
+                                                               secure=self.encrypt_connections,
+                                                               dns_nameservers=self.dns_nameservers,
+                                                               source_ip=self.source_ip)
         self.set_ldap_servers_or_uris(ldap_uris)
 
     def refresh_kerberos_server_discovery(self):
@@ -351,7 +354,9 @@ class ADDomain:
         moved up in priority, unavailable servers to be removed from the list, and previously unavailable
         servers to be added.
         """
-        kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain, site=self.site)
+        kerberos_uris = discover_kdc_domain_controllers_in_domain(self.domain, site=self.site,
+                                                                  dns_nameservers=self.dns_nameservers,
+                                                                  source_ip=self.source_ip)
         self.set_kerberos_uris(kerberos_uris)
 
     def _create_connection(self, user, password, authentication_mechanism, **kwargs):
@@ -462,3 +467,29 @@ class ADDomain:
                                             supports_legacy_behavior=supports_legacy_behavior,
                                             computer_key_file_path=computer_key_file_path,
                                             **additional_account_attributes)
+
+    def __repr__(self):
+        result = 'ADDomain(domain={}'.format(self.domain)
+        if self.site:
+            result += ', site={}'.format(self.site)
+        enc_connections = 'True' if self.encrypt_connections else 'False'
+        result += ', encrypt_connections=' + enc_connections
+        if self.ldap_servers:
+            list_repr = ','.join(serv.__repr__() for serv in self.ldap_servers)
+            result += ', ldap_servers_or_uris=[{}]'.format(list_repr)
+        if self.kerberos_uris:
+            list_repr = ','.join(serv.__repr__() for serv in self.kerberos_uris)
+            result += ', kerberos_uris=[{}]'.format(list_repr)
+        if self.ca_certificates_file_path:
+            result += ', ca_certificates_file_path=' + self.ca_certificates_file_path
+        if self.dns_nameservers:
+            list_repr = ','.join(serv.__repr__() for serv in self.dns_nameservers)
+            result += ', dns_nameservers=[{}]'.format(list_repr)
+        if self.source_ip:
+            result += ', source_ip=' + self.source_ip
+        result += ')'
+
+        return result
+
+    def __str__(self):
+        return self.__repr__()
