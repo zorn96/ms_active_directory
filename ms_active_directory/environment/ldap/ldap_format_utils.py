@@ -1,10 +1,12 @@
-from ms_active_directory import logging_utils
+import binascii
 
 from ldap3 import Connection
 from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
 from typing import List
 
+
+from ms_active_directory import logging_utils
 from ms_active_directory.environment.ldap.ldap_constants import (
     ADObject,
     AD_USERNAME_RESTRICTED_CHARS,
@@ -130,6 +132,20 @@ def escape_dn_for_filter(anything: str):
         else:
             return char
     return "".join(escape_char(x) for x in anything)
+
+
+def escape_sid_for_filter(sid_str):
+    """ Escape an SID for use in an LDAP filter.
+    If the SID provided is in bytes, then it will be converted to a hex string first and then escaped.
+    If it is already a string, it will be escaped as if it were a hex string.
+    """
+    if isinstance(sid_str, bytes):
+        sid_str = binascii.hexlify(sid_str).decode('UTF-8')
+    hex_escape_char = '\\'
+    # 2 hex characters make up 1 byte, and the LDAP syntax for filtering on a bytestring is to escape
+    # each byte with a backslash while representing them as hex.
+    # see: http://www.ietf.org/rfc/rfc2254.txt
+    return hex_escape_char + hex_escape_char.join(sid_str[i:i+2] for i in range(0, len(sid_str), 2))
 
 
 def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable):

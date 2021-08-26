@@ -27,6 +27,7 @@ AD_ATTRIBUTE_SAMACCOUNT_NAME = 'sAMAccountName'
 AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
 AD_ATTRIBUTE_COMMON_NAME = 'cn'
 AD_ATTRIBUTE_OBJECT_CLASS = 'objectClass'
+AD_ATTRIBUTE_OBJECT_SID = 'objectSID'
 
 # keys for general user, group, and computer attributes
 AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'
