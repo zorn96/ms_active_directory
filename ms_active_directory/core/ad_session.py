@@ -16,15 +16,18 @@ import ms_active_directory.environment.ldap.ldap_format_utils as ldap_utils
 import ms_active_directory.environment.ldap.ldap_constants as ldap_constants
 import ms_active_directory.environment.security.security_config_utils as security_utils
 import ms_active_directory.environment.security.security_config_constants as security_constants
+import ms_active_directory.environment.security.security_descriptor_utils as sd_utils
 
 from ms_active_directory.core.ad_computer import ADComputer
 from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser, ADObject
 from ms_active_directory.exceptions import (
     DomainSearchException,
     DuplicateNameException,
+    InvalidLdapParameterException,
     MembershipModificationException,
     MembershipModificationRollbackException,
     ObjectCreationException,
+    ObjectNotFoundException,
 )
 
 logger = logging_utils.get_logger()
@@ -457,7 +460,7 @@ class ADSession:
         :param return_type: Optional. The class to use to represent the returned objects. Defaults to ADObject.
                             If a generic search is being done, or an object class is used that is not yet supported
                             by this library, using ADObject is recommended.
-        :returns: a list of ADGroup objects representing groups with the specified value for the specified attribute.
+        :returns: a list of ADObject objects representing groups with the specified value for the specified attribute.
         """
         if return_type is None:
             return_type = ADObject
@@ -466,7 +469,9 @@ class ADSession:
             object_class = ldap_constants.TOP_OBJECT_CLASS
 
         # if our attribute value looks like a DN, escape it like one. otherwise, escape normally
-        if ldap_utils.is_dn(attribute_value):
+        if isinstance(attribute_value, bytes):
+            escaped_val = ldap_utils.escape_bytestring_for_filter(attribute_value)
+        elif ldap_utils.is_dn(attribute_value):
             escaped_val = ldap_utils.escape_dn_for_filter(attribute_value)
         else:
             escaped_val = ldap_utils.escape_generic_filter_value(attribute_value)
@@ -555,6 +560,21 @@ class ADSession:
             return None
         return res[0]
 
+    def find_group_by_sid(self, group_sid, attributes_to_lookup: List[str]=None):
+        """ Find a Group in AD given its SID.
+        This function takes in a group's objectSID and then looks up the group in AD using it. SIDs are unique
+        so only a single entry can be found at most.
+        The group SID can be in many formats (well known SID enum, ObjectSID object, canonical SID format,
+        or bytes) and so all 4 possible formats are handled.
+        :param group_sid: The group SID. This may either be a well-known SID enum, an ObjectSID object, a string SID
+                          in canonical format (e.g. S-1-1-0), object SID bytes, or the hex representation of such bytes.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
+                                     what's specified, the group's name and object class attributes will be queried.
+        :returns: an ADGroup object or None if the group does not exist.
+        """
+        return self.find_object_by_sid(group_sid, attributes_to_lookup, object_class=ldap_constants.GROUP_OBJECT_CLASS,
+                                       return_type=ADGroup)
+
     def find_group_by_name(self, group_name: str, attributes_to_lookup: List[str]=None):
         """ Find a Group in AD based on a provided name.
         This function takes in a generic name which can be either a distinguished name, a common name, or a
@@ -566,6 +586,52 @@ class ADSession:
         :raises: a DuplicateNameException if more than one entry exists with this name.
         """
         return self._find_by_name_common(group_name, attributes_to_lookup, is_user=False)
+
+    def find_object_by_sid(self, sid, attributes_to_lookup: List[str]=None, object_class: str=None,
+                           return_type=None):
+        """ Find any object in AD given its SID.
+        This function takes in a user's objectSID and then looks up the user in AD using it. SIDs are unique
+        so only a single entry can be found at most.
+        The user SID can be in many formats (well known SID enum, ObjectSID object, canonical SID format,
+        or bytes) and so all 4 possible formats are handled.
+        :param sid: The object's SID. This may either be a well-known SID enum, an ObjectSID object, a string SID
+                    in canonical format (e.g. S-1-1-0), object SID bytes, or the hex representation of such bytes.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the object. Regardless of
+                                     what's specified, the object's name and object class attributes will be queried.
+        :param object_class: Optional. The object class to filter on when searching. Defaults to 'top' which will
+                             include all objects in AD.
+        :param return_type: Optional. The class to use to represent the returned objects. Defaults to ADObject.
+                            If a generic search is being done, or an object class is used that is not yet supported
+                            by this library, using ADObject is recommended.
+        :returns: an ADObject object or None if the group does not exist.
+        """
+        # if it's a string, or a well known SID, convert it to an ObjectSid object
+        sid_obj_or_bytes = sid
+        if isinstance(sid, str) and sid.upper().startswith('S-'):
+            logger.debug('Converting string SID to ObjectSID object')
+            sd = sd_utils.ObjectSid()
+            sd.from_canonical_string_format(sid.upper())
+            sid_obj_or_bytes = sd
+        elif isinstance(sid, security_constants.WellKnownSID):
+            logger.debug('Converting Well Known SID to ObjectSID object')
+            sd = sd_utils.ObjectSid()
+            sd.from_canonical_string_format(sid.value)
+            sid_obj_or_bytes = sd
+
+        # we must either have an ObjectSid or bytes at this point. we want to end up with bytes
+        sid_bytes = sid_obj_or_bytes
+        if isinstance(sid_obj_or_bytes, sd_utils.ObjectSid):
+            sid_bytes = sid_obj_or_bytes.get_data()
+        elif not isinstance(sid_obj_or_bytes, bytes):
+            raise InvalidLdapParameterException('Object SIDs, regardless of object class, must be specified as one of '
+                                                'the following types: WellKnownSID enum, ObjectSid object, String in '
+                                                'canonical format beginning with S-, bytes.')
+
+        results = self.find_objects_with_attribute(ldap_constants.AD_ATTRIBUTE_OBJECT_SID, sid_bytes,
+                                                   attributes_to_lookup, object_class, return_type)
+        if results:
+            return results[0]
+        return None
 
     def find_users_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None):
         """ Find all users that possess the specified attribute with the specified value, and return a list of ADUser
@@ -636,6 +702,21 @@ class ADSession:
         if not res:
             return None
         return res[0]
+
+    def find_user_by_sid(self, user_sid, attributes_to_lookup: List[str]=None):
+        """ Find a User in AD given its SID.
+        This function takes in a user's objectSID and then looks up the user in AD using it. SIDs are unique
+        so only a single entry can be found at most.
+        The user SID can be in many formats (well known SID enum, ObjectSID object, canonical SID format,
+        or bytes) and so all 4 possible formats are handled.
+        :param user_sid: The user SID. This may either be a well-known SID enum, an ObjectSID object, a string SID
+                         in canonical format (e.g. S-1-1-0), object SID bytes, or the hex representation of such bytes.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the user. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :returns: an ADUser object or None if the group does not exist.
+        """
+        return self.find_object_by_sid(user_sid, attributes_to_lookup, object_class=ldap_constants.USER_OBJECT_CLASS,
+                                       return_type=ADUser)
 
     def find_user_by_name(self, user_name: str, attributes_to_lookup: List[str]=None):
         """ Find a User in AD based on a provided name.
@@ -925,6 +1006,76 @@ class ADSession:
         return self._something_members_to_or_from_groups(users_to_remove, groups_to_remove_them_from,
                                                          self.find_user_by_name, stop_and_rollback_on_error,
                                                          adding=False)
+
+    # Various account management functionalities
+
+    def change_password_for_account(self, account, new_password: str, current_password: str):
+        """ Change a password for a user (includes computers) given the new desired password and old desired password.
+        When a password is changed, the old password is provided along with the new one, and this significantly reduces
+        the permissions needed in order to perform the operation. By default, any user can perform CHANGE_PASSWORD for
+        any other user.
+        This also avoids invalidating kerberos keys generated by the old password. Their validity will depend on the
+        domain's policy regarding old passwords/keys and their allowable use period after change.
+
+        :param account: The account whose password is being changed. This may either be a string account name, to be
+                        looked up, or an ADObject object.
+        :param current_password: The current password for the account.
+        :param new_password: The new password for the account. Technically, if None is specified, then this behaves
+                             as a RESET_PASSWORD operation.
+        :returns: True if the operation succeeds. If the operation fails, either an exception will be raised or False
+                  will be returned depending on whether the ldap connection for this session has "raise_exceptions"
+                  set to True or not.
+        """
+        account_dn = None
+        if isinstance(account, ADObject):
+            account_dn = account.distinguished_name
+        elif isinstance(account, str):
+            account_obj = self.find_user_by_name(account)
+            if account_obj is None:
+                raise ObjectNotFoundException('No account could be found with the User object class and name {}'
+                                              .format(account))
+            account_dn = account_obj.distinguished_name
+        else:
+            raise InvalidLdapParameterException('The account specified must either be an ADObject object or a string '
+                                                'name.')
+        return self.ldap_connection.extend.microsoft.modify_password(account_dn, new_password, current_password)
+
+    def reset_password_for_account(self, account, new_password: str):
+        """ Resets a password for a user (includes computers) to a new desired password.
+        To reset a password, a new password is provided to replace the current one without providing the current
+        password. This is a privileged operation and maps to the RESET_PASSWORD permission in AD.
+
+        :param account: The account whose password is being changed. This may either be a string account name, to be
+                        looked up, or an ADObject object.
+        :param new_password: The new password for the account.
+        :returns: True if the operation succeeds. If the operation fails, either an exception will be raised or False
+                  will be returned depending on whether the ldap connection for this session has "raise_exceptions"
+                  set to True or not.
+        """
+        return self.change_password_for_account(account, new_password, None)
+
+    def unlock_account(self, account):
+        """ Unlock a user who's been locked out for some period of time.
+        :param account: The string name of the user/computer account that has been locked out. This may either be a
+                        sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
+                        and the distinguished name will be extracted from it.
+        :returns: True if the operation succeeds. If the operation fails, either an exception will be raised or False
+                  will be returned depending on whether the ldap connection for this session has "raise_exceptions"
+                  set to True or not.
+        """
+        account_dn = None
+        if isinstance(account, ADObject):
+            account_dn = account.distinguished_name
+        elif isinstance(account, str):
+            account_obj = self.find_user_by_name(account)
+            if account_obj is None:
+                raise ObjectNotFoundException('No account could be found with the User object class and name {}'
+                                              .format(account))
+            account_dn = account_obj.distinguished_name
+        else:
+            raise InvalidLdapParameterException('The account specified must either be an ADObject object or a string '
+                                                'name.')
+        return self.ldap_connection.extend.microsoft.unlock_account(account_dn)
 
     def who_am_i(self):
         """ Return the authorization identity as recognized by the server.

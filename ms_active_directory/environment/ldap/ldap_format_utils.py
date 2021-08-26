@@ -134,18 +134,20 @@ def escape_dn_for_filter(anything: str):
     return "".join(escape_char(x) for x in anything)
 
 
-def escape_sid_for_filter(sid_str):
-    """ Escape an SID for use in an LDAP filter.
-    If the SID provided is in bytes, then it will be converted to a hex string first and then escaped.
+def escape_bytestring_for_filter(byte_str: bytes):
+    """ Escape any bytestring (e.g. SIDs) for use in an LDAP filter.
+    It will be converted to a hex string first and then escaped.
     If it is already a string, it will be escaped as if it were a hex string.
     """
-    if isinstance(sid_str, bytes):
-        sid_str = binascii.hexlify(sid_str).decode('UTF-8')
+    if isinstance(byte_str, bytes):
+        hex_str = binascii.hexlify(byte_str).decode('UTF-8')
+    else:
+        hex_str = byte_str
     hex_escape_char = '\\'
     # 2 hex characters make up 1 byte, and the LDAP syntax for filtering on a bytestring is to escape
     # each byte with a backslash while representing them as hex.
     # see: http://www.ietf.org/rfc/rfc2254.txt
-    return hex_escape_char + hex_escape_char.join(sid_str[i:i+2] for i in range(0, len(sid_str), 2))
+    return hex_escape_char + hex_escape_char.join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
 
 
 def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable):

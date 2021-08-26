@@ -18,7 +18,7 @@ from pyasn1.type.univ import Sequence, Integer
 from struct import pack, unpack, calcsize
 from six import b
 
-from ms_active_directory.environment.ldap.ldap_format_utils import escape_sid_for_filter
+from ms_active_directory.environment.ldap.ldap_format_utils import escape_bytestring_for_filter
 from ms_active_directory.environment.security.security_config_constants import (
     ACE_BODY,
     ACE_COUNT,
@@ -647,7 +647,7 @@ class ObjectSid(Structure):
         return ans
 
     def to_ldap_filter_string_format(self):
-        return escape_sid_for_filter(self.get_data())
+        return escape_bytestring_for_filter(self.get_data())
 
 
 class SelfRelativeSecurityDescriptor(Structure):
