@@ -76,6 +76,11 @@ class ObjectNotFoundException(MsActiveDirectoryException):
         super().__init__(exception_str)
 
 
+class PermissionDeniedException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class SecurityDescriptorDecodeException(MsActiveDirectoryException):
     def __init__(self, exception_str):
         super().__init__(exception_str)

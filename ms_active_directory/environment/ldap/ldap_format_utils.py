@@ -150,7 +150,7 @@ def escape_bytestring_for_filter(byte_str: bytes):
     return hex_escape_char + hex_escape_char.join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
 
 
-def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable):
+def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable, controls: List):
     """ Given a list of entities that might be AD objects or strings, return a map of LDAP distinguished names
     for the entities.
     """
@@ -167,7 +167,7 @@ def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable
                                                     'a function must be provided to look up entities by name. '
                                                     'Context: {}'.format(entity))
             else:
-                entity_obj = lookup_by_name_fn(entity)
+                entity_obj = lookup_by_name_fn(entity, controls=controls)
                 if entity_obj is None:
                     raise ObjectNotFoundException('No entity could be found with name {}'.format(entity))
                 # cast to lowercase for case-insensitive checks later
