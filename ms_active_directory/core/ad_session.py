@@ -7,6 +7,7 @@ from ms_active_directory import logging_utils
 from ldap3 import (
     BASE,
     Connection,
+    MODIFY_REPLACE,
     SUBTREE,
 )
 from ldap3.protocol.rfc4511 import Control
@@ -444,7 +445,7 @@ class ADSession:
     # FUNCTIONS FOR FINDING USERS AND GROUPS
 
     def _find_ad_objects_and_attrs(self, search_base: str, search_filter:str, search_scope: str,
-                                   attributes: List[str], size_limit: int, return_type, controls: List[Control]):
+                                   attributes: List[str], size_limit: int, return_type, controls: List[Control]=None):
         """ A helper function for common search and result parsing logic in other find functions for users
         and groups
         """
@@ -1215,6 +1216,96 @@ class ADSession:
         security_descriptor = sd_utils.SelfRelativeSecurityDescriptor()
         security_descriptor.parse_structure_from_bytes(security_desc_bytes)
         return security_descriptor
+
+    def set_object_security_descriptor(self, ad_object, new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
+                                       raise_exception_on_failure=True):
+        """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
+        object in AD, change its permission ACEs, etc.
+
+        :param ad_object: Either an ADObject object or string distinguished referencing the object to be modified
+        :param new_sec_descriptor: The security descriptor to set on the object.
+        :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
+                                           returning False.
+        :return: A boolean indicating success.
+        :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor
+        """
+        dn_to_modify = None
+        if isinstance(ad_object, ADObject):
+            dn_to_modify = ad_object.distinguished_name
+        elif isinstance(ad_object, str):
+            # do one lookup for existence, separate from reading the security descriptor, for better errors
+            res = self._find_ad_objects_and_attrs(ad_object, ldap_constants.FIND_ANYTHING_FILTER,
+                                                  BASE, [], 1, ADObject, None)
+            if not res:
+                raise ObjectNotFoundException('No object could be found with distinguished name {}'.format(ad_object))
+            ad_object = res[0]
+            dn_to_modify = ad_object.distinguished_name
+
+        new_sec_descriptor_bytes = new_sec_descriptor.get_data(force_recompute=True)
+        changes = {
+            ldap_constants.AD_ATTRIBUTE_SECURITY_DESCRIPTOR: (MODIFY_REPLACE, [new_sec_descriptor_bytes])
+        }
+        res = self.ldap_connection.modify(dn_to_modify, changes)
+        success, result, _, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        logger.debug('Result of modifying security descriptor for %s: %s', dn_to_modify, result)
+
+        if raise_exception_on_failure and not success:
+            raise PermissionDeniedException('Failed to modify the security descriptor for object with distinguished '
+                                            'name {} - this may be due to permission issues or an incomplete security '
+                                            'descriptor. Result: {}'.format(dn_to_modify, result))
+        return success
+
+    def set_group_security_descriptor(self, group, new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
+                                      raise_exception_on_failure=True):
+        """ Set the security descriptor on an Active Directory group. This can be used to change the owner of an
+        group in AD, change its permission ACEs, etc.
+
+        :param group: Either an ADGroup object or string distinguished referencing the group to be modified
+        :param new_sec_descriptor: The security descriptor to set on the object.
+        :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
+                                           returning False.
+        :return: A boolean indicating success.
+        :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor
+        """
+        if isinstance(group, str):
+            # do one lookup for existence, separate from reading the security descriptor, for better errors
+            original = group
+            group = self.find_group_by_name(group)
+            if group is None:
+                raise ObjectNotFoundException('No group could be found with the Group object class and name {}'
+                                              .format(original))
+        elif not isinstance(group, ADUser):
+            raise InvalidLdapParameterException('The group specified must be an ADGroup object or a string group name.')
+        return self.set_object_security_descriptor(group, new_sec_descriptor,
+                                                   raise_exception_on_failure=raise_exception_on_failure)
+
+    def set_user_security_descriptor(self, user, new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
+                                     raise_exception_on_failure=True):
+        """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
+        user in AD, change its permission ACEs, etc.
+
+        :param user: Either an ADUser object or string distinguished referencing the user to be modified.
+        :param new_sec_descriptor: The security descriptor to set on the object.
+        :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
+                                           returning False.
+        :return: A boolean indicating success.
+        :raises: InvalidLdapParameterException if user is not a string or ADUser object
+        :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor
+        """
+        if isinstance(user, str):
+            # do one lookup for existence, separate from reading the security descriptor, for better errors
+            original = user
+            user = self.find_user_by_name(user)
+            if user is None:
+                raise ObjectNotFoundException('No user could be found with the User object class and name {}'
+                                              .format(original))
+        elif not isinstance(user, ADUser):
+            raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
+        return self.set_object_security_descriptor(user, new_sec_descriptor,
+                                                   raise_exception_on_failure=raise_exception_on_failure)
 
     # Various account management functionalities
 
