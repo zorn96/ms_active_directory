@@ -1,10 +1,12 @@
-from ms_active_directory import logging_utils
+import binascii
 
 from ldap3 import Connection
 from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
 from typing import List
 
+
+from ms_active_directory import logging_utils
 from ms_active_directory.environment.ldap.ldap_constants import (
     ADObject,
     AD_USERNAME_RESTRICTED_CHARS,
@@ -132,7 +134,23 @@ def escape_dn_for_filter(anything: str):
     return "".join(escape_char(x) for x in anything)
 
 
-def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable):
+def escape_bytestring_for_filter(byte_str: bytes):
+    """ Escape any bytestring (e.g. SIDs) for use in an LDAP filter.
+    It will be converted to a hex string first and then escaped.
+    If it is already a string, it will be escaped as if it were a hex string.
+    """
+    if isinstance(byte_str, bytes):
+        hex_str = binascii.hexlify(byte_str).decode('UTF-8')
+    else:
+        hex_str = byte_str
+    hex_escape_char = '\\'
+    # 2 hex characters make up 1 byte, and the LDAP syntax for filtering on a bytestring is to escape
+    # each byte with a backslash while representing them as hex.
+    # see: http://www.ietf.org/rfc/rfc2254.txt
+    return hex_escape_char + hex_escape_char.join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
+
+
+def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable, controls: List):
     """ Given a list of entities that might be AD objects or strings, return a map of LDAP distinguished names
     for the entities.
     """
@@ -149,7 +167,7 @@ def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable
                                                     'a function must be provided to look up entities by name. '
                                                     'Context: {}'.format(entity))
             else:
-                entity_obj = lookup_by_name_fn(entity)
+                entity_obj = lookup_by_name_fn(entity, controls=controls)
                 if entity_obj is None:
                     raise ObjectNotFoundException('No entity could be found with name {}'.format(entity))
                 # cast to lowercase for case-insensitive checks later
@@ -191,7 +209,7 @@ def normalize_object_location_in_domain(location: str, domain_dns_name: str):
     return strip_domain_from_object_location(location, domain_dns_name)
 
 
-def process_ldap3_conn_return_value(ldap_connection: Connection, return_value):
+def process_ldap3_conn_return_value(ldap_connection: Connection, return_value, paginated_response=False):
     """ Thread-safe ldap3 connections return a tuple containing a boolean about success,
     the result, the response, and the request. Non-thread-safe ldap3 connections just
     leave the other fields and return a boolean when performing search/add/etc. and
@@ -200,7 +218,10 @@ def process_ldap3_conn_return_value(ldap_connection: Connection, return_value):
     This function processes the return value so that it can be used within this class
     without worrying about the return format.
     """
-    if ldap_connection.strategy.thread_safe:
+    # thread-safe strategies return response tuples of (success, result, response, request)
+    # but paginated searches in the ldap3 library only return the response no matter what, and
+    # the thread-safe unpacking is handled internally during accumulation
+    if ldap_connection.strategy.thread_safe and not paginated_response:
         success, result, response, req = return_value
     else:
         success = return_value
