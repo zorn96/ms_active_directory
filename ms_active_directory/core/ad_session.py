@@ -11,7 +11,7 @@ from ldap3 import (
     SUBTREE,
 )
 from ldap3.protocol.rfc4511 import Control
-from typing import List
+from typing import List, Union
 
 import ms_active_directory.environment.constants as constants
 import ms_active_directory.environment.ldap.ldap_format_utils as ldap_utils
@@ -22,6 +22,7 @@ import ms_active_directory.environment.security.security_descriptor_utils as sd_
 
 from ms_active_directory.core.ad_computer import ADComputer
 from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser, ADObject
+from ms_active_directory.environment.security.ad_security_guids import ADRightsGuid
 from ms_active_directory.exceptions import (
     DomainSearchException,
     DuplicateNameException,
@@ -619,7 +620,8 @@ class ADSession:
             return None
         return res[0]
 
-    def find_group_by_sid(self, group_sid, attributes_to_lookup: List[str]=None, controls: List[Control]=None):
+    def find_group_by_sid(self, group_sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
+                          attributes_to_lookup: List[str]=None, controls: List[Control]=None):
         """ Find a Group in AD given its SID.
         This function takes in a group's objectSID and then looks up the group in AD using it. SIDs are unique
         so only a single entry can be found at most.
@@ -652,7 +654,8 @@ class ADSession:
         """
         return self._find_by_name_common(group_name, attributes_to_lookup, is_user=False, controls=controls)
 
-    def find_object_by_sid(self, sid, attributes_to_lookup: List[str]=None, object_class: str=None,
+    def find_object_by_sid(self, sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
+                           attributes_to_lookup: List[str]=None, object_class: str=None,
                            return_type=None, controls: List[Control]=None):
         """ Find any object in AD given its SID.
         This function takes in a user's objectSID and then looks up the user in AD using it. SIDs are unique
@@ -767,7 +770,7 @@ class ADSession:
             return None
         return res[0]
 
-    def find_user_by_sam_name(self, user_name, attributes_to_lookup: List[str]=None, controls: List[Control]=None):
+    def find_user_by_sam_name(self, user_name: str, attributes_to_lookup: List[str]=None, controls: List[Control]=None):
         """ Find a User in AD based on a specified sAMAccountName name and return it along with any
         requested attributes.
         :param user_name: The sAMAccountName name of the user.
@@ -788,7 +791,8 @@ class ADSession:
             return None
         return res[0]
 
-    def find_user_by_sid(self, user_sid, attributes_to_lookup: List[str]=None, controls: List[Control]=None):
+    def find_user_by_sid(self, user_sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
+                         attributes_to_lookup: List[str]=None, controls: List[Control]=None):
         """ Find a User in AD given its SID.
         This function takes in a user's objectSID and then looks up the user in AD using it. SIDs are unique
         so only a single entry can be found at most.
@@ -857,7 +861,7 @@ class ADSession:
                                          .format(insert, name, insert))
         return result_list[0]
 
-    def _figure_out_search_attributes_for_user_or_group(self, attributes_to_lookup):
+    def _figure_out_search_attributes_for_user_or_group(self, attributes_to_lookup: List[str]):
         """ There's some attributes we'll always get for users and groups, whether callers requested them or not.
         This combines those with any requested attributes
         """
@@ -870,7 +874,7 @@ class ADSession:
 
     # FUNCTIONS FOR FINDING MEMBERSHIP INFORMATION
 
-    def find_groups_for_entities(self, entities: List, attributes_to_lookup: List[str]=None,
+    def find_groups_for_entities(self, entities: List[Union[str, ADObject]], attributes_to_lookup: List[str]=None,
                                  lookup_by_name_fn: callable=None, controls: List[Control]=None):
         """ Find the parent groups for all of the entities in a List.
         These entities may be users, groups, or anything really because Active Directory uses the "groupOfNames" style
@@ -950,7 +954,8 @@ class ADSession:
                     mapping_dict[entity].append(result)
         return mapping_dict
 
-    def find_groups_for_group(self, group, attributes_to_lookup: List[str]=None, controls: List[Control]=None):
+    def find_groups_for_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str]=None,
+                              controls: List[Control]=None):
         """ Find the groups that a group belongs to, look up attributes of theirs, and return information about them.
 
         :param group: The group to lookup group memberships for. This can either be an ADGroup or a string name of an
@@ -968,7 +973,8 @@ class ADSession:
                                                     controls)
         return result_dict[group]
 
-    def find_groups_for_groups(self, groups: List, attributes_to_lookup: List[str]=None, controls: List[Control]=None):
+    def find_groups_for_groups(self, groups: List[Union[str, ADGroup]], attributes_to_lookup: List[str]=None,
+                               controls: List[Control]=None):
         """ Find the groups that a list of groups belong to, look up attributes of theirs, and return information about
         them.
 
@@ -985,7 +991,8 @@ class ADSession:
         """
         return self.find_groups_for_entities(groups, attributes_to_lookup, self.find_group_by_name, controls)
 
-    def find_groups_for_user(self, user, attributes_to_lookup: List[str]=None, controls: List[Control]=None):
+    def find_groups_for_user(self, user: Union[str, ADUser], attributes_to_lookup: List[str]=None,
+                             controls: List[Control]=None):
         """ Find the groups that a user belongs to, look up attributes of theirs, and return information about them.
 
         :param user: The user to lookup group memberships for. This can either be an ADUser or a string name of an
@@ -1002,7 +1009,8 @@ class ADSession:
         result_dict = self.find_groups_for_entities([user], attributes_to_lookup, self.find_user_by_name, controls)
         return result_dict[user]
 
-    def find_groups_for_users(self, users: List, attributes_to_lookup: List[str]=None, controls: List[Control]=None):
+    def find_groups_for_users(self, users: List[Union[str, ADUser]], attributes_to_lookup: List[str]=None,
+                              controls: List[Control]=None):
         """ Find the groups that a list of users belong to, look up attributes of theirs, and return information about
         them.
 
@@ -1021,7 +1029,8 @@ class ADSession:
 
     # FUNCTIONS FOR MODIFYING MEMBERSHIPS
 
-    def _something_members_to_or_from_groups(self, members: List, groups_to_modify: List,
+    def _something_members_to_or_from_groups(self, members: List[Union[str, ADObject]],
+                                             groups_to_modify: List[Union[str, ADGroup]],
                                              member_lookup_fn: callable, stop_and_rollback_on_error: bool,
                                              adding: bool, controls: List[Control]):
         """ Either add or remove members to/from groups. Members may be users or groups or string distinguished names.
@@ -1097,23 +1106,27 @@ class ADSession:
                                                   'back changes to other groups.'.format(failing_group, verb))
         return original_groups_that_succeeded
 
-    def add_groups_to_groups(self, groups_to_add: List, groups_to_add_them_to: List,
+    def add_groups_to_groups(self, groups_to_add: List[Union[str, ADGroup]],
+                             groups_to_add_them_to: List[Union[str, ADGroup]],
                              stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
         return self._something_members_to_or_from_groups(groups_to_add, groups_to_add_them_to, self.find_group_by_name,
                                                          stop_and_rollback_on_error, adding=True, controls=controls)
 
-    def add_users_to_groups(self, users_to_add: List, groups_to_add_them_to: List,
+    def add_users_to_groups(self, users_to_add: List[Union[str, ADUser]],
+                            groups_to_add_them_to: List[Union[str, ADGroup]],
                             stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
         return self._something_members_to_or_from_groups(users_to_add, groups_to_add_them_to, self.find_user_by_name,
                                                          stop_and_rollback_on_error, adding=True, controls=controls)
 
-    def remove_groups_from_groups(self, groups_to_remove: List, groups_to_remove_them_from: List,
+    def remove_groups_from_groups(self, groups_to_remove: List[Union[str, ADGroup]],
+                                  groups_to_remove_them_from: List[Union[str, ADGroup]],
                                   stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
         return self._something_members_to_or_from_groups(groups_to_remove, groups_to_remove_them_from,
                                                          self.find_group_by_name, stop_and_rollback_on_error,
                                                          adding=False, controls=controls)
 
-    def remove_users_from_groups(self, users_to_remove: List, groups_to_remove_them_from: List,
+    def remove_users_from_groups(self, users_to_remove: List[Union[str, ADUser]],
+                                 groups_to_remove_them_from: List[Union[str, ADGroup]],
                                  stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
         return self._something_members_to_or_from_groups(users_to_remove, groups_to_remove_them_from,
                                                          self.find_user_by_name, stop_and_rollback_on_error,
@@ -1121,7 +1134,7 @@ class ADSession:
 
     # Functions for managing permissions within the domain
 
-    def find_security_descriptor_for_group(self, group, include_sacl: bool=False):
+    def find_security_descriptor_for_group(self, group: Union[str, ADGroup], include_sacl: bool=False):
         """ Given a group, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -1146,7 +1159,7 @@ class ADSession:
             raise InvalidLdapParameterException('The group specified must be an ADGroup object or a string group name.')
         return self.find_security_descriptor_for_object(group, include_sacl=include_sacl)
 
-    def find_security_descriptor_for_user(self, user, include_sacl: bool=False):
+    def find_security_descriptor_for_user(self, user: Union[str, ADUser], include_sacl: bool=False):
         """ Given a user, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -1171,7 +1184,7 @@ class ADSession:
             raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
         return self.find_security_descriptor_for_object(user, include_sacl=include_sacl)
 
-    def find_security_descriptor_for_object(self, ad_object, include_sacl: bool=False):
+    def find_security_descriptor_for_object(self, ad_object: Union[str, ADObject], include_sacl: bool=False):
         """ Given an object, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -1217,8 +1230,8 @@ class ADSession:
         security_descriptor.parse_structure_from_bytes(security_desc_bytes)
         return security_descriptor
 
-    def set_object_security_descriptor(self, ad_object, new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                       raise_exception_on_failure=True):
+    def set_object_security_descriptor(self, ad_object: Union[str, ADObject], new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
+                                       raise_exception_on_failure: bool=True):
         """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
         object in AD, change its permission ACEs, etc.
 
@@ -1228,7 +1241,8 @@ class ADSession:
                                            returning False.
         :return: A boolean indicating success.
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
-        :raises: PermissionDeniedException if we fail to modify the Security Descriptor
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
+                 is true
         """
         dn_to_modify = None
         if isinstance(ad_object, ADObject):
@@ -1256,8 +1270,8 @@ class ADSession:
                                             'descriptor. Result: {}'.format(dn_to_modify, result))
         return success
 
-    def set_group_security_descriptor(self, group, new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                      raise_exception_on_failure=True):
+    def set_group_security_descriptor(self, group: Union[str, ADGroup], new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
+                                      raise_exception_on_failure: bool=True):
         """ Set the security descriptor on an Active Directory group. This can be used to change the owner of an
         group in AD, change its permission ACEs, etc.
 
@@ -1267,7 +1281,8 @@ class ADSession:
                                            returning False.
         :return: A boolean indicating success.
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
-        :raises: PermissionDeniedException if we fail to modify the Security Descriptor
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
+                 is true
         """
         if isinstance(group, str):
             # do one lookup for existence, separate from reading the security descriptor, for better errors
@@ -1276,13 +1291,13 @@ class ADSession:
             if group is None:
                 raise ObjectNotFoundException('No group could be found with the Group object class and name {}'
                                               .format(original))
-        elif not isinstance(group, ADUser):
+        elif not isinstance(group, ADGroup):
             raise InvalidLdapParameterException('The group specified must be an ADGroup object or a string group name.')
         return self.set_object_security_descriptor(group, new_sec_descriptor,
                                                    raise_exception_on_failure=raise_exception_on_failure)
 
-    def set_user_security_descriptor(self, user, new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                     raise_exception_on_failure=True):
+    def set_user_security_descriptor(self, user: Union[str, ADUser], new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
+                                     raise_exception_on_failure: bool=True):
         """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
         user in AD, change its permission ACEs, etc.
 
@@ -1293,7 +1308,8 @@ class ADSession:
         :return: A boolean indicating success.
         :raises: InvalidLdapParameterException if user is not a string or ADUser object
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
-        :raises: PermissionDeniedException if we fail to modify the Security Descriptor
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
+                 is true
         """
         if isinstance(user, str):
             # do one lookup for existence, separate from reading the security descriptor, for better errors
@@ -1306,6 +1322,207 @@ class ADSession:
             raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
         return self.set_object_security_descriptor(user, new_sec_descriptor,
                                                    raise_exception_on_failure=raise_exception_on_failure)
+
+    def add_permission_to_object_security_descriptor(self, ad_object_to_modify: Union[str, ADObject],
+                                                     sids_to_grant_permissions_to: List[Union[str, sd_utils.ObjectSid, security_constants.WellKnownSID]],
+                                                     access_masks_to_add: List[sd_utils.AccessMask]=None,
+                                                     rights_guids_to_add: List[Union[ADRightsGuid, str]]=None,
+                                                     read_property_guids_to_add: List[str]=None,
+                                                     write_property_guids_to_add: List[str]=None,
+                                                     raise_exception_on_failure: bool=True):
+        """ Add specified permissions to the security descriptor on an object for specified SIDs.
+        This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
+        privileged actions on the object, via adding access masks or rights guids respectively. It can also give
+        1 or more users/groups/computers/etc. the ability to read or write specific properties on the object by
+        specifying read or write property guids to add.
+
+        This can, as an example, take a container object and give a user the right to delete it. Or take a group object
+        and give a list of computers the right to read and write the group's members. Or take a computer and let a user
+        reset its password without needing the current one. Etc. Etc.
+
+        :param ad_object_to_modify: An ADObject or String distinguished name, referring to the object that will have
+                                    the permissions on it modified.
+        :param sids_to_grant_permissions_to: SIDs referring to the other entities that will be given new permissions
+                                             on the object. These may be ObjectSID objects, SID strings, or
+                                             WellKnownSIDs.
+        :param access_masks_to_add: A list of AccessMask objects to grant to the SIDs. These represent broad categories
+                                    of actions, such as GENERIC_READ and GENERIC_WRITE.
+        :param rights_guids_to_add: A list of rights guids to grant to the SIDs. These may be specified as strings or
+                                    as ADRightsGuid enums, and represent narrower permissions to grant to the SIDs for
+                                    targeted actions such as Unexpire_Password or Apply_Group_Policy. Some of these
+                                    do not make logical sense to use in all contexts, as some rights guids only have
+                                    meaning in a self-relative context, or only have meaning on some object types.
+                                    It is left up to the caller to decide what is meaningful.
+        :param read_property_guids_to_add: A list of property guids that represent properties of the object that the
+                                           SIDs will be granted the right to read. These must be strings.
+        :param write_property_guids_to_add: A list of property guids that represent properties of the object that the
+                                            SIDs will be granted the right to write. These must be strings.
+        :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
+                                           the security descriptor, instead of returning False. defaults to True
+        :return: A boolean indicating if we succeeded in updating the security descriptor.
+        :raises: InvalidLdapParameterException if any inputs are the wrong type.
+        :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
+                 is true
+        """
+        # turn all of our SIDs into strings
+        sid_strings = []
+        for sid in sids_to_grant_permissions_to:
+            if isinstance(sid, str):
+                sid_strings.append(sid)
+            elif isinstance(sid, security_constants.WellKnownSID):
+                sid_strings.append(sid.value)
+            elif isinstance(sid, sd_utils.ObjectSid):
+                sid_strings.append(sid.to_canonical_string_format())
+            else:
+                raise InvalidLdapParameterException('All specified SIDs must be strings, ObjectSID objects, or'
+                                                    'instances of the WellKnownSID enum. {} is not.'.format(sid))
+
+        priv_guid_strings = []
+        for priv_guid in rights_guids_to_add:
+            if isinstance(priv_guid, str):
+                priv_guid_strings.append(priv_guid)
+            elif isinstance(priv_guid, ADRightsGuid):
+                priv_guid_strings.append(priv_guid.value)
+            else:
+                raise InvalidLdapParameterException('All specified rights guids must be strings or instances of the'
+                                                    'ADRightsGuid enum. {} is not.'.format(priv_guid))
+
+        # make sure we have an AD object early, so that our next calls for the lookup for the current SD and for setting
+        # the SD are more efficient
+        if isinstance(ad_object_to_modify, ADObject):
+            pass
+        elif isinstance(ad_object_to_modify, str):
+            # do one lookup for existence, separate from reading the security descriptor, for better errors
+            res = self._find_ad_objects_and_attrs(ad_object_to_modify, ldap_constants.FIND_ANYTHING_FILTER,
+                                                  BASE, [], 1, ADObject, None)
+            if not res:
+                raise ObjectNotFoundException('No object could be found with distinguished name {}'
+                                              .format(ad_object_to_modify))
+            ad_object_to_modify = res[0]
+
+        current_sd = self.find_security_descriptor_for_object(ad_object_to_modify)
+
+        for sid_string in sid_strings:
+            current_sd = sd_utils.add_permissions_to_security_descriptor(current_sd, sid_string,
+                                                                         access_masks=access_masks_to_add,
+                                                                         privilege_guids=priv_guid_strings,
+                                                                         read_property_guids=read_property_guids_to_add,
+                                                                         write_property_guids=write_property_guids_to_add)
+        return self.set_object_security_descriptor(ad_object_to_modify, current_sd,
+                                                   raise_exception_on_failure=raise_exception_on_failure)
+
+    def add_permission_to_group_security_descriptor(self, group,
+                                                    sids_to_grant_permissions_to: List[Union[str, sd_utils.ObjectSid, security_constants.WellKnownSID]],
+                                                    access_masks_to_add: List[sd_utils.AccessMask]=None,
+                                                    rights_guids_to_add: List[Union[ADRightsGuid, str]]=None,
+                                                    read_property_guids_to_add: List[str]=None,
+                                                    write_property_guids_to_add: List[str]=None,
+                                                    raise_exception_on_failure: bool=True):
+        """ Add specified permissions to the security descriptor on a group for specified SIDs.
+        This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
+        privileged actions on the group, via adding access masks or rights guids respectively. It can also give
+        1 or more users/groups/computers/etc. the ability to read or write specific properties on the group by
+        specifying read or write property guids to add.
+
+        This can, as an example, take a group and give another group the right to delete it. Or take a group
+        and give a list of computers the right to read the group's SID. Or take a group and let another user
+        add members to it. Etc. Etc.
+
+        :param group: An ADGroup or String distinguished name, referring to the group that will have the permissions on it
+                     modified.
+        :param sids_to_grant_permissions_to: SIDs referring to the other entities that will be given new permissions
+                                             on the group. These may be ObjectSID objects, SID strings, or
+                                             WellKnownSIDs.
+        :param access_masks_to_add: A list of AccessMask objects to grant to the SIDs. These represent broad categories
+                                    of actions, such as GENERIC_READ and GENERIC_WRITE.
+        :param rights_guids_to_add: A list of rights guids to grant to the SIDs. These may be specified as strings or
+                                    as ADRightsGuid enums, and represent narrower permissions to grant to the SIDs for
+                                    targeted actions such as Unexpire_Password or Apply_Group_Policy. Some of these
+                                    do not make logical sense to use in all contexts, as some rights guids only have
+                                    meaning in a self-relative context, or only have meaning on some object types.
+                                    It is left up to the caller to decide what is meaningful.
+        :param read_property_guids_to_add: A list of property guids that represent properties of the group that the
+                                           SIDs will be granted the right to read. These must be strings.
+        :param write_property_guids_to_add: A list of property guids that represent properties of the group that the
+                                            SIDs will be granted the right to write. These must be strings.
+        :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
+                                           the security descriptor, instead of returning False. defaults to True
+        :return: A boolean indicating if we succeeded in updating the security descriptor.
+        :raises: InvalidLdapParameterException if any inputs are the wrong type.
+        :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
+                 is true
+        """
+        if isinstance(group, str):
+            # do one lookup for existence, separate from reading the security descriptor, for better errors
+            original = group
+            group = self.find_user_by_name(group)
+            if group is None:
+                raise ObjectNotFoundException('No group could be found with the Group object class and name {}'
+                                              .format(original))
+        elif not isinstance(group, ADGroup):
+            raise InvalidLdapParameterException('The group specified must be an ADGroup object or a string group name.')
+        return self.add_permission_to_object_security_descriptor(group, sids_to_grant_permissions_to,
+                                                                 access_masks_to_add, rights_guids_to_add,
+                                                                 read_property_guids_to_add, write_property_guids_to_add,
+                                                                 raise_exception_on_failure=raise_exception_on_failure)
+
+    def add_permission_to_user_security_descriptor(self, user: Union[str, ADUser],
+                                                   sids_to_grant_permissions_to: List[Union[str, sd_utils.ObjectSid, security_constants.WellKnownSID]],
+                                                   access_masks_to_add: List[sd_utils.AccessMask]=None,
+                                                   rights_guids_to_add: List[Union[ADRightsGuid, str]]=None,
+                                                   read_property_guids_to_add: List[str]=None,
+                                                   write_property_guids_to_add: List[str]=None,
+                                                   raise_exception_on_failure: bool=True):
+        """ Add specified permissions to the security descriptor on a user for specified SIDs.
+        This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
+        privileged actions on the user, via adding access masks or rights guids respectively. It can also give
+        1 or more users/groups/computers/etc. the ability to read or write specific properties on the user by
+        specifying read or write property guids to add.
+
+        This can, as an example, take a user and give another user the right to delete it. Or take a user
+        and give a list of computers the right to read and write the user's owner SID. Or take a user and let another user
+        reset their password without needing the current one. Etc. Etc.
+
+        :param user: An ADUser or String distinguished name, referring to the user that will have the permissions on it
+                     modified.
+        :param sids_to_grant_permissions_to: SIDs referring to the other entities that will be given new permissions
+                                             on the user. These may be ObjectSID objects, SID strings, or
+                                             WellKnownSIDs.
+        :param access_masks_to_add: A list of AccessMask objects to grant to the SIDs. These represent broad categories
+                                    of actions, such as GENERIC_READ and GENERIC_WRITE.
+        :param rights_guids_to_add: A list of rights guids to grant to the SIDs. These may be specified as strings or
+                                    as ADRightsGuid enums, and represent narrower permissions to grant to the SIDs for
+                                    targeted actions such as Unexpire_Password or Apply_Group_Policy. Some of these
+                                    do not make logical sense to use in all contexts, as some rights guids only have
+                                    meaning in a self-relative context, or only have meaning on some object types.
+                                    It is left up to the caller to decide what is meaningful.
+        :param read_property_guids_to_add: A list of property guids that represent properties of the user that the
+                                           SIDs will be granted the right to read. These must be strings.
+        :param write_property_guids_to_add: A list of property guids that represent properties of the user that the
+                                            SIDs will be granted the right to write. These must be strings.
+        :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
+                                           the security descriptor, instead of returning False. defaults to True
+        :return: A boolean indicating if we succeeded in updating the security descriptor.
+        :raises: InvalidLdapParameterException if any inputs are the wrong type.
+        :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
+                 is true
+        """
+        if isinstance(user, str):
+            # do one lookup for existence, separate from reading the security descriptor, for better errors
+            original = user
+            user = self.find_user_by_name(user)
+            if user is None:
+                raise ObjectNotFoundException('No user could be found with the User object class and name {}'
+                                              .format(original))
+        elif not isinstance(user, ADUser):
+            raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
+        return self.add_permission_to_object_security_descriptor(user, sids_to_grant_permissions_to,
+                                                                 access_masks_to_add, rights_guids_to_add,
+                                                                 read_property_guids_to_add, write_property_guids_to_add,
+                                                                 raise_exception_on_failure=raise_exception_on_failure)
 
     # Various account management functionalities
 

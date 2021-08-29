@@ -17,6 +17,7 @@ from pyasn1.type.namedtype import NamedTypes, NamedType
 from pyasn1.type.univ import Sequence, Integer
 from struct import pack, unpack, calcsize
 from six import b
+from typing import List
 
 from ms_active_directory.environment.ldap.ldap_format_utils import escape_bytestring_for_filter
 from ms_active_directory.environment.security.security_config_constants import (
@@ -65,10 +66,34 @@ from ms_active_directory.exceptions import (
 )
 
 
-def add_permissions_to_security_descriptor_dacl(current_security_descriptor_bytes, sid_string,
-                                                access_masks=None, privilege_guids=None,
-                                                read_property_guids=None, write_property_guids=None):
+def add_permissions_to_security_descriptor_dacl(current_security_descriptor_bytes: bytes, sid_string: str,
+                                                access_masks: List=None, privilege_guids: List[str]=None,
+                                                read_property_guids: List[str]=None,
+                                                write_property_guids: List[str]=None):
     """ Given a bytestring for the current security descriptor on an Active Directory object,
+    an SID to add permissions for, an optional list of access masks, and an optional list of
+    privilege guids, we construct new ACE entries for every access mask and privilege guid we
+    want to add.
+    We then add these ACEs to the DACL of the security descriptor and compute the new security
+    descriptor.
+
+    This function works even if we're adding access masks and privilege guids that already exist
+    for the on the object for the given SID. Active Directory will de-dupe the ACEs and collapse
+    them down.
+    """
+    current_sd = SelfRelativeSecurityDescriptor()
+    current_sd.parse_structure_from_bytes(current_security_descriptor_bytes)
+    current_sd = add_permissions_to_security_descriptor(current_sd, sid_string, access_masks, privilege_guids,
+                                                        read_property_guids, write_property_guids)
+
+    return current_sd.get_data(force_recompute=True)
+
+
+def add_permissions_to_security_descriptor(current_security_descriptor, sid_string: str,
+                                           access_masks: List=None, privilege_guids: List[str]=None,
+                                           read_property_guids: List[str]=None,
+                                           write_property_guids: List[str]=None):
+    """ Given a security descriptor object representing the DACL bytes on an Active Directory object,
     an SID to add permissions for, an optional list of access masks, and an optional list of
     privilege guids, we construct new ACE entries for every access mask and privilege guid we
     want to add.
@@ -100,16 +125,14 @@ def add_permissions_to_security_descriptor_dacl(current_security_descriptor_byte
         new_aces.append(new_ace)
 
     if not new_aces:
-        return current_security_descriptor_bytes
+        return current_security_descriptor
 
-    current_sd = SelfRelativeSecurityDescriptor()
-    current_sd.parse_structure_from_bytes(current_security_descriptor_bytes)
-    current_sd[DACL].append_aces(new_aces)
+    current_security_descriptor[DACL].append_aces(new_aces)
 
-    return current_sd.get_data(force_recompute=True)
+    return current_security_descriptor
 
 
-def create_ace_for_allow_access(sid_string, access_mask):
+def create_ace_for_allow_access(sid_string: str, access_mask):
     """ Construct an Access Control Entry (ACE) granting the provided SID the provided permission
     on the object to which the ACE is attached.
     """

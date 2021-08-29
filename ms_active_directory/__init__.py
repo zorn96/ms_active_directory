@@ -35,11 +35,13 @@ from ms_active_directory.environment.kerberos.kerberos_raw_key_generator import 
 
 from ms_active_directory.environment.ldap.ldap_constants import *
 
+from ms_active_directory.environment.security.ad_security_guids import ADRightsGuid
 from ms_active_directory.environment.security.security_config_constants import (
     ADEncryptionType,
     WellKnownSID,
 )
 from ms_active_directory.environment.security.security_descriptor_utils import (
+    AccessMask,
     ObjectSid,
     SelfRelativeSecurityDescriptor,
 )
