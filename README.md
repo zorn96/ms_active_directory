@@ -17,12 +17,13 @@ library.
 # Key Features
 1. Joining a computer to a domain
 2. Discovering domain resources and properties, optimizing domain communication for the network
-3. Finding users and groups based on a variety of properties (e.g. name, SID, user-specified protperties)
+3. Finding users and groups based on a variety of properties (e.g. name, SID, user-specified properties)
 4. Querying information about users, groups, and generic objects
 5. Looking up user and group memberships
 6. Adding and removing users and groups to and from other groups
-7. Looking up information about the permissions set on a user, group, or generic object
-8. Adding permissions to the security descriptor for a user, group, or generic object
+7. Account management functionality, such as password changes/resets, and unlocking accounts
+8. Looking up information about the permissions set on a user, group, or generic object
+9. Adding permissions to the security descriptor for a user, group, or generic object
 
 
 # Examples
