@@ -450,7 +450,8 @@ class ADSession:
         """
         attrs = self._figure_out_search_attributes_for_user_or_group(attributes)
         # do a paged search for big searches so that if we're in a multi-threaded application, we're more interruptable
-        if size_limit == 0 or size_limit > self.search_paging_size:
+        paginate = size_limit == 0 or size_limit > self.search_paging_size
+        if paginate:
             res = self.ldap_connection.extend.standard.paged_search(search_base=search_base,
                                                                     search_filter=search_filter,
                                                                     search_scope=search_scope,
@@ -468,7 +469,8 @@ class ADSession:
                                               size_limit=size_limit,
                                               attributes=attrs,
                                               controls=controls)
-        _, _, resp, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        _, _, resp, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res,
+                                                                   paginated_response=paginate)
         resp = ldap_utils.remove_ad_search_refs(resp)
         if not resp:
             return []
@@ -481,13 +483,15 @@ class ADSession:
         return results
 
     def find_objects_with_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None,
-                                    object_class: str=None, return_type=None, controls: List[Control]=None):
+                                    size_limit: int=0, object_class: str=None, return_type=None, controls: List[Control]=None):
         """ Find all AD objects that possess the specified attribute with the specified value and return them.
 
         :param attribute_name: The LDAP name of the attribute to be used in the search.
         :param attribute_value: The value that returned objects should possess for the attribute.
         :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
                                      what's specified, the groups' name and object class attributes will be queried.
+        :param size_limit: An integer indicating a limit to place the number of results the search will return.
+                           If not specified, defaults to 0, meaning unlimited.
         :param object_class: Optional. The object class to filter on when searching. Defaults to 'top' which will
                              include all objects in AD.
         :param return_type: Optional. The class to use to represent the returned objects. Defaults to ADObject.
@@ -522,12 +526,12 @@ class ADSession:
             attributes_to_lookup.append(attribute_name)
         # a size limit of 0 means unlimited
         res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
-                                              attributes_to_lookup, 0, return_type, controls)
+                                              attributes_to_lookup, size_limit, return_type, controls)
         logger.info('%s %s objects found with %s value %s', len(res), object_class, attribute_name, attribute_value)
         return res
 
     def find_groups_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None,
-                                 controls: List[Control]=None):
+                                 size_limit: int=0, controls: List[Control]=None):
         """ Find all groups that possess the specified attribute with the specified value, and return a list of ADGroup
         objects.
 
@@ -535,12 +539,14 @@ class ADSession:
         :param attribute_value: The value that returned groups should possess for the attribute.
         :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
                                      what's specified, the groups' name and object class attributes will be queried.
+        :param size_limit: An integer indicating a limit to place the number of results the search will return.
+                           If not specified, defaults to 0, meaning unlimited.
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
         :returns: a list of ADGroup objects representing groups with the specified value for the specified attribute.
         """
-        return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup,
+        return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup, size_limit,
                                                 ldap_constants.GROUP_OBJECT_CLASS, ADGroup, controls)
 
     def find_groups_by_common_name(self, group_name: str, attributes_to_lookup: List[str]=None,
@@ -689,13 +695,13 @@ class ADSession:
                                                 'canonical format beginning with S-, bytes.')
 
         results = self.find_objects_with_attribute(ldap_constants.AD_ATTRIBUTE_OBJECT_SID, sid_bytes,
-                                                   attributes_to_lookup, object_class, return_type, controls)
+                                                   attributes_to_lookup, 1, object_class, return_type, controls)
         if results:
             return results[0]
         return None
 
     def find_users_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None,
-                                controls: List[Control]=None):
+                                size_limit: int=0, controls: List[Control]=None):
         """ Find all users that possess the specified attribute with the specified value, and return a list of ADUser
         objects.
 
@@ -703,12 +709,14 @@ class ADSession:
         :param attribute_value: The value that returned groups should possess for the attribute.
         :param attributes_to_lookup: A list of additional LDAP attributes to query for the users. Regardless of
                                      what's specified, the users' name and object class attributes will be queried.
+        :param size_limit: An integer indicating a limit to place the number of results the search will return.
+                           If not specified, defaults to 0, meaning unlimited.
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
         :returns: a list of ADUser objects representing groups with the specified value for the specified attribute.
         """
-        return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup,
+        return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup, size_limit,
                                                 ldap_constants.USER_OBJECT_CLASS, ADUser, controls)
 
     def find_users_by_common_name(self, user_name: str, attributes_to_lookup: List[str]=None,

@@ -151,10 +151,10 @@ class WellKnownSID(Enum):
     # users who can login interactively using RDP
     REMOTE_DESKTOP_USERS_BUILT_IN_GROUP = 'S-1-5-32-555'
     # Network operators can configure networking, duh
-    NETWORK_CONFIG_OPERATORS = 'S-1-5-32-556'
+    NETWORK_CONFIG_OPERATORS_BUILT_IN_GROUP = 'S-1-5-32-556'
     # SKIPPING LOTS OF NOT SUPER COMMON GROUPS TO SAVE TYPING
     # ...
     # These users can use WS-Management for WMI namespaces
-    REMOTE_MANAGEMENT_USERS = 'S-1-5-32-580'
+    REMOTE_MANAGEMENT_USERS_BUILT_IN_GROUP = 'S-1-5-32-580'
     # membership controlled by the OS
-    ALL_SERVICES = 'S-1-5-80-0'
+    ALL_SERVICES_BUILT_IN_GROUP = 'S-1-5-80-0'

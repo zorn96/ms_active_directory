@@ -209,7 +209,7 @@ def normalize_object_location_in_domain(location: str, domain_dns_name: str):
     return strip_domain_from_object_location(location, domain_dns_name)
 
 
-def process_ldap3_conn_return_value(ldap_connection: Connection, return_value):
+def process_ldap3_conn_return_value(ldap_connection: Connection, return_value, paginated_response=False):
     """ Thread-safe ldap3 connections return a tuple containing a boolean about success,
     the result, the response, and the request. Non-thread-safe ldap3 connections just
     leave the other fields and return a boolean when performing search/add/etc. and
@@ -218,7 +218,10 @@ def process_ldap3_conn_return_value(ldap_connection: Connection, return_value):
     This function processes the return value so that it can be used within this class
     without worrying about the return format.
     """
-    if ldap_connection.strategy.thread_safe:
+    # thread-safe strategies return response tuples of (success, result, response, request)
+    # but paginated searches in the ldap3 library only return the response no matter what, and
+    # the thread-safe unpacking is handled internally during accumulation
+    if ldap_connection.strategy.thread_safe and not paginated_response:
         success, result, response, req = return_value
     else:
         success = return_value

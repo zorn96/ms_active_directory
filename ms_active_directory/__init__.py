@@ -37,6 +37,11 @@ from ms_active_directory.environment.ldap.ldap_constants import *
 
 from ms_active_directory.environment.security.security_config_constants import (
     ADEncryptionType,
+    WellKnownSID,
+)
+from ms_active_directory.environment.security.security_descriptor_utils import (
+    ObjectSid,
+    SelfRelativeSecurityDescriptor,
 )
 
 from ms_active_directory.environment.constants import (
