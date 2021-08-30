@@ -1,5 +1,3 @@
-import copy
-
 from ms_active_directory.environment.ldap.ldap_constants import (
     ADObject,
     AD_ATTRIBUTE_COMMON_NAME,
@@ -11,9 +9,6 @@ from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_UNIX_LOGIN_SHELL,
     UNKNOWN_GROUP_POSIX_GID,
     UNKNOWN_USER_POSIX_UID,
-)
-from ms_active_directory.environment.ldap.ldap_format_utils import (
-    normalize_object_location_in_domain
 )
 
 
@@ -28,11 +23,6 @@ class ADUser(ADObject):
         self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS)
 
         self.name = self.samaccount_name
-        # to get the location of a user, remove their common name from the front and the domain's
-        # domain components from the end
-        rdn_of_user = normalize_object_location_in_domain(dn, self.domain.get_domain_dns_name())
-        user_piece = 'CN=' + self.common_name
-        self.location = rdn_of_user[len(user_piece)+1:]
 
 
 class ADPosixUser(ADUser):
@@ -73,11 +63,6 @@ class ADGroup(ADObject):
         self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS)
 
         self.name = self.samaccount_name
-        # to get the location of a user, remove their common name from the front and the domain's
-        # domain components from the end
-        rdn_of_user = normalize_object_location_in_domain(dn, self.domain.get_domain_dns_name())
-        user_piece = 'CN=' + self.common_name
-        self.location = rdn_of_user[len(user_piece)+1:]
 
 
 class ADPosixGroup(ADGroup):

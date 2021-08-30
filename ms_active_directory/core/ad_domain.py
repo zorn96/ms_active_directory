@@ -34,7 +34,7 @@ from typing import List
 from ms_active_directory.core.ad_session import ADSession
 from ms_active_directory.environment.constants import ADFunctionalLevel
 from ms_active_directory.environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
-from ms_active_directory.environment.format_utils import format_computer_name_for_authentication
+from ms_active_directory.environment.format_utils import format_computer_name_for_authentication, get_system_default_computer_name
 from ms_active_directory.environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
 from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS,
@@ -74,13 +74,32 @@ def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, a
                        computer_key_file_path=computer_key_file_path, **additional_account_attributes)
 
 
+def join_ad_domain_by_taking_over_existing_computer(domain_dns_name: str, admin_user: str, admin_password: str,
+                                                    authentication_mechanism: str=SIMPLE, ad_site: str=None,
+                                                    computer_name: str=None, computer_password: str=None,
+                                                    old_computer_password: str=None,
+                                                    computer_key_file_path: str=DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
+    """ A super simple 'join a domain' function using pre-created computer accounts, which requires minimal input -
+    the domain dns name and admin credentials to use in the join process.
+    Specifying a computer name explicitly for the account to take over is also highly recommended.
+
+    Given those basic inputs, the domain's nearest controllers are automatically discovered and the computer account
+    with the specified computer name is found and taken over so it can represent the local system in the domain,
+    and the local system can act as it.
+    """
+    domain = ADDomain(domain_dns_name, site=ad_site)
+    return domain.join_by_taking_over_existing_computer(admin_user, admin_password, authentication_mechanism,
+                                                        computer_name=computer_name, computer_password=computer_password,
+                                                        old_computer_password=old_computer_password,
+                                                        computer_key_file_path=computer_key_file_path)
+
+
 def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, computer_location=None,
                                  computer_password=None, computer_encryption_types=None, computer_hostnames=None,
                                  computer_services=None, supports_legacy_behavior=False,
                                  computer_key_file_path=DEFAULT_KRB5_KEYTAB_FILE_LOCATION,
                                  **additional_account_attributes):
-    """ A fairly simple 'join a domain' function that requires minimal input - an AD session and admin credentials
-    to use in the join process.
+    """ A fairly simple 'join a domain' function that requires minimal input - an AD session.
     Given those basic inputs, the domain's nearest controllers are automatically discovered and an account is made
     with strong security settings. The account's attributes follow AD naming conventions based on the computer's
     hostname by default.
@@ -89,12 +108,7 @@ def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, comp
     """
     # for joining a domain, default to using the local machine's hostname as a computer name
     if computer_name is None:
-        computer_name = socket.gethostname()
-        # if there's dots (e.g. our computer is server1.com) just take the first piece
-        if '.' in computer_name:
-            computer_name = computer_name.split('.')[0]
-        logger.info('Using computer hostname (or its first component after splitting on dots) as computer name to '
-                    'join domain: {}'.format(computer_name))
+        computer_name = get_system_default_computer_name()
     logger.info('Attempting to join computer to domain %s with name %s', ad_session.get_domain_dns_name(),
                 computer_name)
     computer = ad_session.create_computer(computer_name, computer_location=computer_location,
@@ -106,6 +120,37 @@ def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, comp
         computer.write_full_keytab_file_for_computer(computer_key_file_path)
     logger.info('Successfully joined computer to domain %s with name %s', ad_session.get_domain_dns_name(),
                 computer_name)
+    return computer
+
+
+def join_ad_domain_by_taking_over_existing_computer_using_session(ad_session: ADSession, computer_name=None,
+                                                                  computer_password=None, old_computer_password=None,
+                                                                  computer_key_file_path=DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
+    """ A fairly simple 'join a domain' function using pre-created accounts, which requires minimal input - an AD
+    session. Specifying the name of the computer to takeover explicitly is also encouraged.
+
+    Given those basic inputs, the domain's nearest controllers are automatically discovered and an account is found
+    with the computer name specified.
+    That account is then taken over so that it can be controlled by the local system, and kerberos keys and such are
+    generated for it.
+
+    By providing an AD session, one can build a connection to the domain however they so choose and then use it to
+    join this computer, so you don't even need to necessarily use user credentials.
+    """
+    # for joining a domain, default to using the local machine's hostname as a computer name
+    if computer_name is None:
+        computer_name = get_system_default_computer_name()
+        logger.warning('No computer name was specified for joining via computer takeover. This is unusual and relies '
+                       'implicitly on the computers in the domain matching this library in terms of how they decide '
+                       'on the computer name, and may cause errors. The name being used is %s', computer_name)
+    logger.info('Attempting to join computer to domain %s by taking over account with name %s',
+                ad_session.get_domain_dns_name(), computer_name)
+    computer = ad_session.take_over_existing_computer(computer_name, computer_password=computer_password,
+                                                      old_computer_password=old_computer_password)
+    if computer_key_file_path is not None:
+        computer.write_full_keytab_file_for_computer(computer_key_file_path)
+    logger.info('Successfully joined computer to domain %s by taking over computer with name %s',
+                ad_session.get_domain_dns_name(), computer_name)
     return computer
 
 
@@ -467,6 +512,22 @@ class ADDomain:
                                             supports_legacy_behavior=supports_legacy_behavior,
                                             computer_key_file_path=computer_key_file_path,
                                             **additional_account_attributes)
+
+    def join_by_taking_over_existing_computer(self, admin_username: str, admin_password: str,
+                                              authentication_mechanism: str=SIMPLE, computer_name: str=None,
+                                              computer_password: str=None, old_computer_password: str=None,
+                                              computer_key_file_path: str=DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
+        """ A super simple 'join the domain' function that requires minimal input - just admin user credentials
+        to use in the join process.
+        Given those basic inputs, the domain's settings are used to establish a connection, and an account is made
+        with strong security settings. The account's attributes follow AD naming conventions based on the computer's
+        hostname by default.
+        """
+        ad_session = self.create_session_as_user(admin_username, admin_password, authentication_mechanism)
+        return join_ad_domain_by_taking_over_existing_computer_using_session(ad_session, computer_name=computer_name,
+                                                                             computer_password=computer_password,
+                                                                             old_computer_password=old_computer_password,
+                                                                             computer_key_file_path=computer_key_file_path)
 
     def __repr__(self):
         result = 'ADDomain(domain={}'.format(self.domain)

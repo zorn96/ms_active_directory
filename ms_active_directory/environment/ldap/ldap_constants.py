@@ -1,4 +1,5 @@
 import copy
+from ldap3.utils.dn import parse_dn
 
 CERTIFICATE_AUTHORITY_OBJECT_CLASS = 'certificationAuthority'
 TRUSTED_DOMAIN_OBJECT_CLASS = 'TrustedDomain'
@@ -89,6 +90,7 @@ DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
 # when checking if something simply exists, or getting everything at a level/subtree,
 # we use this filter
 FIND_ANYTHING_FILTER = '(objectClass=*)'
+FIND_COMPUTER_FILTER = '(objectClass=Computer)'
 FIND_GROUP_FILTER = '(objectClass=Group)'
 FIND_USER_FILTER = '(objectClass=User)'
 
@@ -107,6 +109,15 @@ class ADObject:
         self.all_attributes = attributes if attributes else {}
         # used for __repr__
         self.class_name = 'ADObject'
+
+        # to get the location of an object, we split up all of the DN components and remove the
+        # first component (the object itself) and the domain components. reassembling what remains
+        # gives us the relative dn of the object's container
+        dn_pieces = parse_dn(dn, escape=True)
+        superlative_dn_pieces = dn_pieces[1:]
+        superlative_dn_pieces_without_domain = [piece for piece in superlative_dn_pieces if piece[0].lower() != 'dc']
+        reconstructed_pieces = [piece[0] + '=' + piece[1] + piece[2] for piece in superlative_dn_pieces_without_domain]
+        self.location = ''.join(reconstructed_pieces)
 
     def get(self, attribute_name: str, unpack_one_item_lists=False):
         """ Get an attribute about the group that isn't explicitly tracked as a member """

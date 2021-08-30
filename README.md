@@ -15,7 +15,8 @@ library.
 **Email**: a.zornberg96@gmail.com
 
 # Key Features
-1. Joining a computer to a domain
+1. Joining a computer to a domain, either by creating a new computer account or taking over an existing
+   account.
 2. Discovering domain resources and properties, optimizing domain communication for the network
 3. Finding users and groups based on a variety of properties (e.g. name, SID, user-specified properties)
 4. Querying information about users, groups, and generic objects

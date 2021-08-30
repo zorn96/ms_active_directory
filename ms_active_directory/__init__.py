@@ -5,7 +5,9 @@ from ms_active_directory.core.ad_computer import (
 from ms_active_directory.core.ad_domain import (
     ADDomain,
     join_ad_domain,
+    join_ad_domain_by_taking_over_existing_computer,
     join_ad_domain_using_session,
+    join_ad_domain_by_taking_over_existing_computer_using_session,
 )
 
 from ms_active_directory.core.ad_kerberos_keys import (
@@ -18,6 +20,7 @@ from ms_active_directory.core.ad_session import (
 
 from ms_active_directory.core.ad_users_and_groups import (
     ADGroup,
+    ADObject,
     ADUser
 )
 
@@ -52,4 +55,4 @@ from ms_active_directory.environment.constants import (
 )
 
 from ms_active_directory.exceptions import *
-from ms_active_directory.logging_utils import configure_log_level
+from ms_active_directory.logging_utils import configure_log_level, get_logger

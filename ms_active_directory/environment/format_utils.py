@@ -1,6 +1,6 @@
 import ipaddress
+import socket
 
-from ms_active_directory import logging_utils
 
 from ldap3 import (
     KERBEROS,
@@ -11,6 +11,7 @@ from ldap3.utils.dn import (
     parse_dn,
 )
 
+from ms_active_directory import logging_utils
 from ms_active_directory.environment.ldap.ldap_format_utils import is_dn
 from ms_active_directory.exceptions import InvalidDomainParameterException
 
@@ -70,3 +71,13 @@ def format_hostname_or_ip_and_port_to_uri(host_or_ip: str, port: str, is_ipv6_fm
     if is_ipv6_fmt:
         return '[{}]:{}'.format(host_or_ip, port)
     return '{}:{}'.format(host_or_ip, port)
+
+
+def get_system_default_computer_name():
+    computer_name = socket.gethostname()
+    # if there's dots (e.g. our computer is server1.com) just take the first piece
+    if '.' in computer_name:
+        computer_name = computer_name.split('.')[0]
+    logger.info('Using computer hostname (or its first component after splitting on dots) as computer name %s ',
+                computer_name)
+    return computer_name
