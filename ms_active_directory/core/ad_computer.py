@@ -52,7 +52,7 @@ class ADComputer:
                                  .format(original))
             self.encryption_types.append(enc_type)
         # assume the account is a new account unless given a kvno
-        self.kvno = 1 if kvno is None else self.kvno
+        self.kvno = 1 if kvno is None else kvno
 
         self.kerberos_keys = []
         self.raw_kerberos_keys = []

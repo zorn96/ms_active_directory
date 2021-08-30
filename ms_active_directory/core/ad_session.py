@@ -24,6 +24,7 @@ from ms_active_directory.core.ad_computer import ADComputer
 from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser, ADObject
 from ms_active_directory.environment.security.ad_security_guids import ADRightsGuid
 from ms_active_directory.exceptions import (
+    DomainJoinException,
     DomainSearchException,
     DuplicateNameException,
     InvalidLdapParameterException,
@@ -154,8 +155,9 @@ class ADSession:
         real_entities = ldap_utils.remove_ad_search_refs(response)
         return len(real_entities) > 0
 
-    def _create_object(self, object_dn: str, object_classes: List[str], account_attr_dict: dict):
-        if self.dn_exists_in_domain(object_dn):
+    def _create_object(self, object_dn: str, object_classes: List[str], account_attr_dict: dict,
+                       sanity_check_for_existence: bool=True):
+        if sanity_check_for_existence and self.dn_exists_in_domain(object_dn):
             raise ObjectCreationException('An object already exists within the domain with distinguished name {} - '
                                           'please remove it or change the attributes specified such that a different '
                                           'distinguished name is created.'.format(object_dn))
@@ -207,8 +209,13 @@ class ADSession:
                                               attributes, such as "userCertificate" to set the certificate
                                               for a computer that will use mutual TLS for EXTERNAL SASL auth.
                                               This also allows overriding of some values that are not explicit
-                                              keyword arguments in order to avoid overcomplication, since most
+                                              keyword arguments in order to avoid over-complication, since most
                                               people won't set them (e.g. userAccountControl).
+        :returns: an ADComputer object representing the computer.
+        :raises: DomainJoinException if any of our validation of the specified attributes fails or if anything
+                 specified conflicts with objects in the domain.
+        :raises: ObjectCreationException if we fail to create the computer for a reason unrelated to what we can
+                 easily validate in advance (e.g. permission issue)
         """
         logger.debug('Request to create computer in domain %s with the following attributes: computer_name=%s, '
                      'computer_location=%s encryption_types=%s hostnames=%s services=%s supports_legacy_behavior=%s '
@@ -220,8 +227,8 @@ class ADSession:
         samaccount_name = computer_name + '$'
 
         if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, samaccount_name):
-            raise ObjectCreationException('An object already exists with sAMAccountName {} so a computer may not be '
-                                          'created with the name {}'.format(samaccount_name, computer_name))
+            raise DomainJoinException('An object already exists with sAMAccountName {} so a computer may not be '
+                                      'created with the name {}'.format(samaccount_name, computer_name))
 
         # get or normalize our computer location. the end format is as a relative distinguished name
         if computer_location is None:
@@ -230,16 +237,16 @@ class ADSession:
             computer_location = ldap_utils.normalize_object_location_in_domain(computer_location,
                                                                                self.domain_dns_name)
         if not self.dn_exists_in_domain(computer_location):
-            raise ObjectCreationException('The computer location {} cannot be found in the domain.'
-                                          .format(computer_location))
+            raise DomainJoinException('The computer location {} cannot be found in the domain.'
+                                      .format(computer_location))
         # now we can build our full object distinguished name
         computer_dn = ldap_utils.construct_object_distinguished_name(computer_name, computer_location,
                                                                      self.domain_dns_name)
         if self.dn_exists_in_domain(computer_dn):
-            raise ObjectCreationException('There exists an object in the domain with distinguished name {} and so a '
-                                          'computer may not be created in the domain with name {} in location {}. '
-                                          'Please use a different name or location.'
-                                          .format(computer_dn, computer_name, computer_location))
+            raise DomainJoinException('There exists an object in the domain with distinguished name {} and so a '
+                                      'computer may not be created in the domain with name {} in location {}. '
+                                      'Please use a different name or location.'
+                                      .format(computer_dn, computer_name, computer_location))
 
         # generate a password if needed and encode it
         if computer_password is None:
@@ -260,12 +267,12 @@ class ADSession:
         spns = ldap_utils.construct_service_principal_names(services, hostnames)
         for spn in spns:
             if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES, spn):
-                raise ObjectCreationException('An object exists in the domain with service principal name {} and so '
-                                              'creating a computer with the hostnames ({}) and services ({}) in use '
-                                              'will cause undefined, conflicting behavior during lookups. Please '
-                                              'specify different hostnames or services, or a different computer name '
-                                              'if hostnames are not being explicitly set.'
-                                              .format(spn, ', '.join(hostnames), ', '.join(services)))
+                raise DomainJoinException('An object exists in the domain with service principal name {} and so '
+                                          'creating a computer with the hostnames ({}) and services ({}) in use '
+                                          'will cause undefined, conflicting behavior during lookups. Please '
+                                          'specify different hostnames or services, or a different computer name '
+                                          'if hostnames are not being explicitly set.'
+                                          .format(spn, ', '.join(hostnames), ', '.join(services)))
 
         computer_attributes = {
             ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL: ldap_constants.COMPUTER_ACCESS_CONTROL_VAL,
@@ -286,21 +293,144 @@ class ADSession:
         # add in our additional account attributes at the end so they can override anything we set here
         computer_attributes.update(additional_account_attributes)
 
-        self._create_object(computer_dn, ldap_constants.OBJECT_CLASSES_FOR_COMPUTER, computer_attributes)
+        self._create_object(computer_dn, ldap_constants.OBJECT_CLASSES_FOR_COMPUTER, computer_attributes,
+                            sanity_check_for_existence=False)  # we already checked for this
         return ADComputer(samaccount_name, self.domain, computer_location, computer_password, spns,
                           encryption_types)
 
-    def take_over_existing_computer(self, computer_name: str):
+    def take_over_existing_computer(self, computer: Union[ADComputer, ADObject, str], computer_password: str=None,
+                                    old_computer_password: str=None):
         """ Use the session to take over a computer in the domain and return a computer object.
         This resets the computer's password so that nobody else can impersonate it, and reads
         the computer's attributes in order to create a computer object and return it.
-        :param computer_name: The common name or sAMAccountName of the computer to find in the AD domain.
-                              If it appears to be a common name, not ending in $, a sAMAccountName will
-                              be derived to search for. If that cannot be found, then a search will be
-                              done for this as a common name. If no unique computer can be found with that
-                              search, then an exception will be raised.
+        :param computer: This can be an ADComputer or ADObject object representing the computer that should be
+                         taken over, or a string identifier for the computer.  If it is a string, it should be
+                         the common name or sAMAccountName of the computer to find in the AD domain, or it can be
+                         the distinguished name of a computer object.
+                         If it appears to be a common name, not ending in $, a sAMAccountName will
+                         be derived to search for. If that cannot be found, then a search will be
+                         done for this as a common name. If no unique computer can be found with that
+                         search, then an exception will be raised.
+        :param computer_password: The password to be set for the computer. This is particularly
+                                  useful to specify if the computer will be shared across multiple
+                                  applications or devices, or if pre-creating a computer for another
+                                  application to use. If not specified, a random 120 character
+                                  password will be generated.
+        :param old_computer_password: The current password for the computer. This is used to reduce the level of
+                                      permissions needed for the takeover operation.
+        :returns: an ADComputer object representing the computer.
+        :raises: DomainJoinException if any of our validation of the specified attributes fails or if anything
+                 specified conflicts with objects in the domain.
+        :raises: ObjectNotFoundException if a computer cannot be found based on the name specified.
         """
-        raise NotImplementedError()
+        attributes_to_retrieve = [ldap_constants.AD_ATTRIBUTE_ENCRYPTION_TYPES,  # for key generation and validation
+                                  ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME,  # for key generation and identity
+                                  ldap_constants.AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES,  # for key generation
+                                  ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL,  # for validation
+                                  ldap_constants.AD_ATTRIBUTE_KVNO]  # for key generation
+        # if we got an object, we don't know that it has all the attributes we need, so redo the lookup
+        if isinstance(computer, ADObject):
+            computer = computer.distinguished_name
+        elif isinstance(computer, ADComputer):
+            computer = computer.get_samaccount_name()
+
+        # at this point, if we don't have a string, then an invalid type was specified
+        if not isinstance(computer, str):
+            raise InvalidLdapParameterException('The specified computer must either be an ADComputer object or an '
+                                                'ADObject object representing the computer, or a string identifier for '
+                                                'the computer.')
+
+        computer_obj = None
+        # if we got a dn, look it up and make sure it's a computer. otherwise, try to look
+        if isinstance(computer, str) and ldap_utils.is_dn(computer):
+            computer_objs = self._find_ad_objects_and_attrs(computer, ldap_constants.FIND_COMPUTER_FILTER,
+                                                            BASE, attributes_to_retrieve, 1, ADObject)
+            if not computer_objs:
+                raise ObjectNotFoundException('No computer could be found with the Computer object class and '
+                                              'distinguished name {}'.format(computer))
+            logger.info('Found computer to takeover using distinguished name %s', computer)
+            computer_obj = computer_objs[0]
+        elif isinstance(computer, str):
+            # try to find a computer with computer_name as its sAMAccountName
+            guessed_samaccount_name = computer
+            if not computer.endswith('$'):
+                guessed_samaccount_name += '$'
+            # try our computer name as specified first, since you don't technically NEED computers to end with a $
+            for sam in [computer, guessed_samaccount_name]:
+                computer_objs = self.find_objects_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME,
+                                                                 sam, attributes_to_retrieve, size_limit=1,
+                                                                 object_class=ldap_constants.COMPUTER_OBJECT_CLASS,
+                                                                 return_type=ADObject)
+                logger.info('Found %s computer results to take over looking up sAMAccountName %s',
+                            len(computer_objs), sam)
+                if computer_objs:
+                    computer_obj = computer_objs[0]
+                    break
+            # try to use computer_name as a common name
+            if computer_obj is None:
+                computer_objs = self.find_objects_with_attribute(ldap_constants.AD_ATTRIBUTE_COMMON_NAME,
+                                                                 computer, attributes_to_retrieve,
+                                                                 object_class=ldap_constants.COMPUTER_OBJECT_CLASS,
+                                                                 return_type=ADObject)
+                logger.info('Found %s computer results to take over looking up common name %s',
+                            len(computer_objs), computer)
+                if len(computer_objs) == 0:
+                    raise ObjectNotFoundException('No computer could be found with the Computer object class that '
+                                                  'possesses either a common name of {}, or a sAMAccountName of {} or '
+                                                  '{}'.format(computer, computer, guessed_samaccount_name))
+                if len(computer_objs) > 1:
+                    raise DuplicateNameException('No computer could be found with the Computer object class that '
+                                                 'possesses a sAMAccountName of {} or {} - but multiple computers were '
+                                                 'found with the common name {}. Please specify the sAMAccountName of '
+                                                 'the computer you wish to take over, or its distinguished name.'
+                                                 .format(computer, guessed_samaccount_name, computer))
+                computer_obj = computer_objs[0]
+
+        spns = computer_obj.get(ldap_constants.AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES)
+        enc_type_value = int(computer_obj.get(ldap_constants.AD_ATTRIBUTE_ENCRYPTION_TYPES))
+        samaccount_name = computer_obj.get(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME)
+        encryption_types = security_utils.get_supported_encryption_type_enums_from_value(enc_type_value)
+        acct_control = int(computer_obj.get(ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL))
+        kvno = int(computer_obj.get(ldap_constants.AD_ATTRIBUTE_KVNO))
+        computer_location = computer_obj.location
+
+        # validate our encryption types and user account control
+        unsupported = [enc_type.name for enc_type in encryption_types if enc_type in security_constants.UNSUPPORTED_ENC_TYPES]
+        if unsupported:
+            raise DomainJoinException('The following unsupported encryption types were found to be enabled on the '
+                                      'computer specified to be taken over: {}'.format(', '.join(unsupported)))
+        if acct_control != ldap_constants.COMPUTER_ACCESS_CONTROL_VAL:
+            raise DomainJoinException('Currently, it is only supported to take over computers with the account control '
+                                      '{}, indicating a workstation trust account with a non-expiring password. The '
+                                      'control seen on the computer specified to be taken over was {}.'
+                                      .format(ldap_constants.COMPUTER_ACCESS_CONTROL_VAL, acct_control))
+
+        # reset the account password
+        if computer_password is None:
+            logger.info('Generating random AD password for %s during account takeover', samaccount_name)
+            computer_password = security_utils.generate_random_ad_password()
+
+        if old_computer_password is not None:
+            success = self.change_password_for_account(computer_obj, computer_password, old_computer_password)
+            if not success:
+                raise DomainJoinException('Failed to change the password on the computer account. Please check the '
+                                          'old password specified for correctness, and ensure that the user being '
+                                          'used for this takeover operation has the CHANGE PASSWORD permission on '
+                                          'the computer.')
+        else:
+            success = self.reset_password_for_account(computer_obj, computer_password)
+            if not success:
+                raise DomainJoinException('Failed to reset the password on the computer account. Please check the '
+                                          'permissions of the user being used for this takeover operation and ensure '
+                                          'they have the RESET PASSWORD permission, or provide the current computer '
+                                          'password for takeover.')
+        logger.info('Incrementing kvno from %s to %s after successful password update for %s',
+                    kvno, kvno+1, samaccount_name)
+        kvno += 1
+
+        logger.info('Successfully took over computer with sAMAccountName %s', samaccount_name)
+        return ADComputer(samaccount_name, self.domain, computer_location, computer_password, spns,
+                          encryption_types, kvno=kvno)
 
     # FUNCTIONS FOR FINDING DOMAIN INFORMATION
 

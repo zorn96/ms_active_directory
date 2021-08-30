@@ -15,7 +15,8 @@ library.
 **Email**: a.zornberg96@gmail.com
 
 # Key Features
-1. Joining a computer to a domain
+1. Joining a computer to a domain, either by creating a new computer account or taking over an existing
+   account.
 2. Discovering domain resources and properties, optimizing domain communication for the network
 3. Finding users and groups based on a variety of properties (e.g. name, SID, user-specified properties)
 4. Querying information about users, groups, and generic objects
@@ -371,6 +372,30 @@ computer_name = 'workstation10'
 
 comp = domain.join(user, password, computer_hostnames=[computer_host1, computer_host2],
                    computer_services=services, computer_location=less_privileged_loc)
+```
+
+### Join the domain by taking over an existing account
+For some setups, accounts may be pre-created and then taken over by the computers that will use them.
+
+This can be done in order to greatly restrict the permissions of the user that is used for joining,
+as they only need `RESET PASSWORD` permissions on the computer account, or `CHANGE PASSWORD` if
+the current computer password is provided.
+```
+from ms_active_directory import ADDomain, join_ad_domain_by_taking_over_existing_computer
+
+domain_dns_name = 'example.com'
+site = 'us-eastern-dc'
+existing_computer_name = 'precreated-comp'
+user = 'single-account-admin@example.com'
+password = 'password2'
+
+computer_obj = join_ad_domain_by_taking_over_existing_computer(domain_dns_name, user, password,
+                                                               ad_site=site, computer_name=existing_computer_name)
+                                                               
+# or use a domain object to use various power-user domain features
+domain = ADDomain(domain_dns_name, site=site,
+                  source_ip='10.25.21.30', dns_nameservers=['10.25.21.20'])
+domain.join_by_taking_over_existing_computer(user, password, computer_name=existing_computer_name)
 ```
 
 # Managing users and groups

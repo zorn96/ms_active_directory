@@ -16,6 +16,11 @@ class DomainConnectException(MsActiveDirectoryException):
         super().__init__(exception_str)
 
 
+class DomainJoinException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class DomainSearchException(MsActiveDirectoryException):
     def __init__(self, exception_str):
         super().__init__(exception_str)
