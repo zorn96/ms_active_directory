@@ -1701,6 +1701,88 @@ class ADSession:
         """
         return self.change_password_for_account(account, new_password, None)
 
+    def disable_account(self, account):
+        """ Disable a user account.
+        :param account: The string name of the user/computer account to disable. This may either be a
+                        sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
+                        and the distinguished name will be extracted from it.
+        :returns: True if the operation succeeds. If the operation fails, either an exception will be raised or False
+                  will be returned depending on whether the ldap connection for this session has "raise_exceptions"
+                  set to True or not.
+        """
+        # even if we get an object, re-find the account because we need the current userAccountControl
+        if isinstance(account, ADObject):
+            account = account.distinguished_name
+
+        if isinstance(account, str):
+            account_obj = self.find_user_by_name(account, attributes_to_lookup=[ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL])
+            if account_obj is None:
+                raise ObjectNotFoundException('No account could be found with the User object class and name {}'
+                                              .format(account))
+        else:
+            raise InvalidLdapParameterException('The account specified must either be an ADObject object or a string '
+                                                'name.')
+        account_dn = account_obj.distinguished_name
+        current_user_access_control = int(account_obj.get(ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL))
+        new_access_control = current_user_access_control | ldap_constants.ACCOUNT_DISABLED
+        # if the account is already disabled, this is a no-op
+        if current_user_access_control == new_access_control:
+            logger.info('Account with distinguished name %s is already disabled. No action is needed',
+                        account_dn)
+            return True
+        changes = {
+            ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL: (MODIFY_REPLACE, new_access_control)
+        }
+        res = self.ldap_connection.modify(account_dn, changes)
+        success, result, _, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+
+        if not success:
+            logger.warning('Result of modifying user account control to disable %s: %s', account_dn, result)
+        else:
+            logger.debug('Result of modifying user account control to disable %s: %s', account_dn, result)
+        return success
+
+    def enable_account(self, account):
+        """ Enable a user account.
+        :param account: The string name of the user/computer account to enable. This may either be a
+                        sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
+                        and the distinguished name will be extracted from it.
+        :returns: True if the operation succeeds. If the operation fails, either an exception will be raised or False
+                  will be returned depending on whether the ldap connection for this session has "raise_exceptions"
+                  set to True or not.
+        """
+        # even if we get an object, re-find the account because we need the current userAccountControl
+        if isinstance(account, ADObject):
+            account = account.distinguished_name
+
+        if isinstance(account, str):
+            account_obj = self.find_user_by_name(account, attributes_to_lookup=[ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL])
+            if account_obj is None:
+                raise ObjectNotFoundException('No account could be found with the User object class and name {}'
+                                              .format(account))
+        else:
+            raise InvalidLdapParameterException('The account specified must either be an ADObject object or a string '
+                                                'name.')
+        account_dn = account_obj.distinguished_name
+        current_user_access_control = int(account_obj.get(ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL))
+        new_access_control = current_user_access_control & ~ldap_constants.ACCOUNT_DISABLED
+        # if the account is already enabled, this is a no-op
+        if current_user_access_control == new_access_control:
+            logger.info('Account with distinguished name %s is already enabled. No action is needed',
+                        account_dn)
+            return True
+        changes = {
+            ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL: (MODIFY_REPLACE, new_access_control)
+        }
+        res = self.ldap_connection.modify(account_dn, changes)
+        success, result, _, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+
+        if not success:
+            logger.warning('Result of modifying user account control to disable %s: %s', account_dn, result)
+        else:
+            logger.debug('Result of modifying user account control to disable %s: %s', account_dn, result)
+        return success
+
     def unlock_account(self, account):
         """ Unlock a user who's been locked out for some period of time.
         :param account: The string name of the user/computer account that has been locked out. This may either be a
