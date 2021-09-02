@@ -11,6 +11,11 @@ class MsActiveDirectoryException(Exception):
         super().__init__(self.message)
 
 
+class AttributeModificationException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class DomainConnectException(MsActiveDirectoryException):
     def __init__(self, exception_str):
         super().__init__(exception_str)
