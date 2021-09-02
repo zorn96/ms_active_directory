@@ -1,3 +1,4 @@
+import collections.abc
 import copy
 import socket
 import ssl
@@ -7,6 +8,7 @@ from ms_active_directory import logging_utils
 from ldap3 import (
     BASE,
     Connection,
+    MODIFY_ADD,
     MODIFY_REPLACE,
     SUBTREE,
 )
@@ -24,6 +26,7 @@ from ms_active_directory.core.ad_computer import ADComputer
 from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser, ADObject
 from ms_active_directory.environment.security.ad_security_guids import ADRightsGuid
 from ms_active_directory.exceptions import (
+    AttributeModificationException,
     DomainJoinException,
     DomainSearchException,
     DuplicateNameException,
@@ -1278,15 +1281,7 @@ class ADSession:
         :raises: InvalidLdapParameterException if the group specified is not a string or an ADGroup object
         :raises: SecurityDescriptorDecodeException if we fail to decode the security descriptor.
         """
-        if isinstance(group, str):
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            original = group
-            group = self.find_group_by_name(group)
-            if group is None:
-                raise ObjectNotFoundException('No group could be found with the Group object class and name {}'
-                                              .format(original))
-        elif not isinstance(group, ADGroup):
-            raise InvalidLdapParameterException('The group specified must be an ADGroup object or a string group name.')
+        group = self._validate_group_and_get_group_obj(group)
         return self.find_security_descriptor_for_object(group, include_sacl=include_sacl)
 
     def find_security_descriptor_for_user(self, user: Union[str, ADUser], include_sacl: bool=False):
@@ -1303,15 +1298,7 @@ class ADSession:
         :raises: InvalidLdapParameterException if the user specified is not a string or an ADUser object
         :raises: SecurityDescriptorDecodeException if we fail to decode the security descriptor.
         """
-        if isinstance(user, str):
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            original = user
-            user = self.find_user_by_name(user)
-            if user is None:
-                raise ObjectNotFoundException('No user could be found with the User object class and name {}'
-                                              .format(original))
-        elif not isinstance(user, ADUser):
-            raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
+        user = self._validate_user_and_get_user_obj(user)
         return self.find_security_descriptor_for_object(user, include_sacl=include_sacl)
 
     def find_security_descriptor_for_object(self, ad_object: Union[str, ADObject], include_sacl: bool=False):
@@ -1328,19 +1315,8 @@ class ADSession:
         :raises: InvalidLdapParameterException if the ad_object specified is not a string DN or an ADObject object
         :raises: SecurityDescriptorDecodeException if we fail to decode the security descriptor.
         """
-        dn_to_search = None
-        if isinstance(ad_object, ADObject):
-            dn_to_search = ad_object.distinguished_name
-        elif isinstance(ad_object, str):
-            dn_to_search = ad_object
-            if not ldap_utils.is_dn(ad_object):
-                raise InvalidLdapParameterException('The object specified must be an ADObject object or a string '
-                                                    'distinguished name.')
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            res = self._find_ad_objects_and_attrs(dn_to_search, ldap_constants.FIND_ANYTHING_FILTER,
-                                                  BASE, [], 1, ADObject, None)
-            if not res:
-                raise ObjectNotFoundException('No object could be found with distinguished name {}'.format(ad_object))
+        ad_object = self._validate_obj_and_get_ad_obj(ad_object)
+        dn_to_search = ad_object.distinguished_name
 
         attrs = [ldap_constants.AD_ATTRIBUTE_SECURITY_DESCRIPTOR]
         controls = sd_utils.get_security_descriptor_read_controls(include_sacl)
@@ -1365,7 +1341,7 @@ class ADSession:
         """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
         object in AD, change its permission ACEs, etc.
 
-        :param ad_object: Either an ADObject object or string distinguished referencing the object to be modified
+        :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
@@ -1374,17 +1350,8 @@ class ADSession:
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        dn_to_modify = None
-        if isinstance(ad_object, ADObject):
-            dn_to_modify = ad_object.distinguished_name
-        elif isinstance(ad_object, str):
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            res = self._find_ad_objects_and_attrs(ad_object, ldap_constants.FIND_ANYTHING_FILTER,
-                                                  BASE, [], 1, ADObject, None)
-            if not res:
-                raise ObjectNotFoundException('No object could be found with distinguished name {}'.format(ad_object))
-            ad_object = res[0]
-            dn_to_modify = ad_object.distinguished_name
+        ad_object = self._validate_obj_and_get_ad_obj(ad_object)
+        dn_to_modify = ad_object.distinguished_name
 
         new_sec_descriptor_bytes = new_sec_descriptor.get_data(force_recompute=True)
         changes = {
@@ -1405,7 +1372,7 @@ class ADSession:
         """ Set the security descriptor on an Active Directory group. This can be used to change the owner of an
         group in AD, change its permission ACEs, etc.
 
-        :param group: Either an ADGroup object or string distinguished referencing the group to be modified
+        :param group: Either an ADGroup object or string name referencing the group to be modified
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
@@ -1414,15 +1381,7 @@ class ADSession:
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        if isinstance(group, str):
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            original = group
-            group = self.find_group_by_name(group)
-            if group is None:
-                raise ObjectNotFoundException('No group could be found with the Group object class and name {}'
-                                              .format(original))
-        elif not isinstance(group, ADGroup):
-            raise InvalidLdapParameterException('The group specified must be an ADGroup object or a string group name.')
+        group = self._validate_group_and_get_group_obj(group)
         return self.set_object_security_descriptor(group, new_sec_descriptor,
                                                    raise_exception_on_failure=raise_exception_on_failure)
 
@@ -1431,7 +1390,7 @@ class ADSession:
         """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
         user in AD, change its permission ACEs, etc.
 
-        :param user: Either an ADUser object or string distinguished referencing the user to be modified.
+        :param user: Either an ADUser object or string name referencing the user to be modified.
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
@@ -1441,15 +1400,7 @@ class ADSession:
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        if isinstance(user, str):
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            original = user
-            user = self.find_user_by_name(user)
-            if user is None:
-                raise ObjectNotFoundException('No user could be found with the User object class and name {}'
-                                              .format(original))
-        elif not isinstance(user, ADUser):
-            raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
+        user = self._validate_user_and_get_user_obj(user)
         return self.set_object_security_descriptor(user, new_sec_descriptor,
                                                    raise_exception_on_failure=raise_exception_on_failure)
 
@@ -1520,17 +1471,7 @@ class ADSession:
 
         # make sure we have an AD object early, so that our next calls for the lookup for the current SD and for setting
         # the SD are more efficient
-        if isinstance(ad_object_to_modify, ADObject):
-            pass
-        elif isinstance(ad_object_to_modify, str):
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            res = self._find_ad_objects_and_attrs(ad_object_to_modify, ldap_constants.FIND_ANYTHING_FILTER,
-                                                  BASE, [], 1, ADObject, None)
-            if not res:
-                raise ObjectNotFoundException('No object could be found with distinguished name {}'
-                                              .format(ad_object_to_modify))
-            ad_object_to_modify = res[0]
-
+        ad_object_to_modify = self._validate_obj_and_get_ad_obj(ad_object_to_modify)
         current_sd = self.find_security_descriptor_for_object(ad_object_to_modify)
 
         for sid_string in sid_strings:
@@ -1584,15 +1525,7 @@ class ADSession:
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        if isinstance(group, str):
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            original = group
-            group = self.find_user_by_name(group)
-            if group is None:
-                raise ObjectNotFoundException('No group could be found with the Group object class and name {}'
-                                              .format(original))
-        elif not isinstance(group, ADGroup):
-            raise InvalidLdapParameterException('The group specified must be an ADGroup object or a string group name.')
+        group = self._validate_group_and_get_group_obj(group)
         return self.add_permission_to_object_security_descriptor(group, sids_to_grant_permissions_to,
                                                                  access_masks_to_add, rights_guids_to_add,
                                                                  read_property_guids_to_add, write_property_guids_to_add,
@@ -1640,15 +1573,7 @@ class ADSession:
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        if isinstance(user, str):
-            # do one lookup for existence, separate from reading the security descriptor, for better errors
-            original = user
-            user = self.find_user_by_name(user)
-            if user is None:
-                raise ObjectNotFoundException('No user could be found with the User object class and name {}'
-                                              .format(original))
-        elif not isinstance(user, ADUser):
-            raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
+        user = self._validate_user_and_get_user_obj(user)
         return self.add_permission_to_object_security_descriptor(user, sids_to_grant_permissions_to,
                                                                  access_masks_to_add, rights_guids_to_add,
                                                                  read_property_guids_to_add, write_property_guids_to_add,
@@ -1673,18 +1598,8 @@ class ADSession:
                   will be returned depending on whether the ldap connection for this session has "raise_exceptions"
                   set to True or not.
         """
-        account_dn = None
-        if isinstance(account, ADObject):
-            account_dn = account.distinguished_name
-        elif isinstance(account, str):
-            account_obj = self.find_user_by_name(account)
-            if account_obj is None:
-                raise ObjectNotFoundException('No account could be found with the User object class and name {}'
-                                              .format(account))
-            account_dn = account_obj.distinguished_name
-        else:
-            raise InvalidLdapParameterException('The account specified must either be an ADObject object or a string '
-                                                'name.')
+        account = self._validate_user_and_get_user_obj(account)
+        account_dn = account.distinguished_name
         return self.ldap_connection.extend.microsoft.modify_password(account_dn, new_password, current_password)
 
     def reset_password_for_account(self, account, new_password: str):
@@ -1792,19 +1707,347 @@ class ADSession:
                   will be returned depending on whether the ldap connection for this session has "raise_exceptions"
                   set to True or not.
         """
-        account_dn = None
-        if isinstance(account, ADObject):
-            account_dn = account.distinguished_name
-        elif isinstance(account, str):
-            account_obj = self.find_user_by_name(account)
-            if account_obj is None:
-                raise ObjectNotFoundException('No account could be found with the User object class and name {}'
-                                              .format(account))
-            account_dn = account_obj.distinguished_name
-        else:
-            raise InvalidLdapParameterException('The account specified must either be an ADObject object or a string '
-                                                'name.')
+        account = self._validate_user_and_get_user_obj(account)
+        account_dn = account.distinguished_name
         return self.ldap_connection.extend.microsoft.unlock_account(account_dn)
+
+    # generic user, group, and object modification functions
+
+    def _do_something_to_attribute_for_object(self, ad_object: Union[str, ADObject], attribute_to_value_map: dict,
+                                              controls: List[Control], raise_exception_on_failure: bool,
+                                              action: str, action_desc_for_errors: str):
+        """ Our helper function for either atomically appending to, or overwriting attributes on an object.
+
+        :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will be set or appended. Values may
+                                       also be iterables such as sets and lists if a multi-valued parameter will be
+                                       set or if multiple values will be appended to it.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param action: The action to take - either MODIFY_ADD or MODIFY_REPLACE
+        :param action_desc_for_errors: A description of what we're doing for use in errors.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        ad_object = self._validate_obj_and_get_ad_obj(ad_object)
+        object_dn = ad_object.distinguished_name
+
+        # format all of the changes provided by users so they're ready to serialize for an ldap message,
+        # and do some validation
+        changes_dict = {}
+        for key, value in attribute_to_value_map.items():
+            if not isinstance(key, str):
+                raise InvalidLdapParameterException('The attributes specified must all be string LDAP attributes. {} '
+                                                    'is not.'.format(key))
+            if value is None:
+                raise InvalidLdapParameterException('Null values may not be specified when {}. A null '
+                                                    'value was specified for {}.'.format(action_desc_for_errors, key))
+            changes_dict[key] = (action, ldap_utils.convert_to_ldap_iterable(value))
+        # do the modification. do not log our values in case they're sensitive (e.g. passwords)
+        logger.debug('Attempting modification of attributes %s for distinguished name %s',
+                     changes_dict.keys(), object_dn)
+        res = self.ldap_connection.modify(object_dn, changes_dict, controls=controls)
+        success, result, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res,
+                                                                                  paginated_response=False)
+        # raise an exception with LDAP details that might be useful to the caller (e.g. bad format of attribute,
+        # insufficient permissions, unwilling to perform due to constraint violation)
+        if raise_exception_on_failure and not success:
+            raise AttributeModificationException('Failed when {} for the object within the domain. LDAP result: {}'
+                                                 .format(action_desc_for_errors, result))
+        return success
+
+    def atomic_append_to_attribute_for_object(self, ad_object: Union[str, ADObject], attribute: str, value,
+                                              controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically append a value to an attribute for an object in the domain.
+
+        :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
+        :param attribute: A string specifying the name of the LDAP attribute to be appended to.
+        :param value: The value to append to the attribute. Value may either be a primitive, such as a string, bytes,
+                      or a number, if a single value will be appended. Value may also be an iterable such as a set or
+                      a list if a multi-valued attribute will be appended to, in order to append multiple new values
+                      to it at once.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        attr_map = {attribute: value}
+        return self._do_something_to_attribute_for_object(ad_object, attr_map, controls, raise_exception_on_failure,
+                                                          MODIFY_ADD, 'appending a value for an attribute')
+
+    def atomic_append_to_attributes_for_object(self, ad_object: Union[str, ADObject], attribute_to_value_map: dict,
+                                               controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically append values to multiple attributes for an object in the domain.
+
+        :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will be appended. Values may
+                                       also be iterables such as sets and lists if multiple values will be appended
+                                       to the attributes.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        return self._do_something_to_attribute_for_object(ad_object, attribute_to_value_map, controls,
+                                                          raise_exception_on_failure, MODIFY_ADD,
+                                                          'appending values for multiple attributes')
+
+    def overwrite_attribute_for_object(self, ad_object: Union[str, ADObject], attribute: str, value,
+                                       controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically overwrite the value of an attribute for an object in the domain.
+
+        :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
+        :param attribute: A string specifying the name of the LDAP attribute to be overwritten.
+        :param value: The value to set for the attribute. Value may either be a primitive, such as a string, bytes,
+                      or a number, if a single value will be set. Value may also be an iterable such as a set or
+                      a list if a multi-valued attribute will be set.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        attr_map = {attribute: value}
+        return self._do_something_to_attribute_for_object(ad_object, attr_map, controls,
+                                                          raise_exception_on_failure, MODIFY_REPLACE,
+                                                          'overwriting a value for an attributes')
+
+    def overwrite_attributes_for_object(self, ad_object: Union[str, ADObject], attribute_to_value_map: dict,
+                                        controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically overwrite values of multiple attributes for an object in the domain.
+
+        :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will set. Values may also be iterables
+                                       such as sets and lists if an attribute is multi-valued and multiple values will
+                                       be set.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        return self._do_something_to_attribute_for_object(ad_object, attribute_to_value_map, controls,
+                                                          raise_exception_on_failure, MODIFY_REPLACE,
+                                                          'overwriting values for multiple attributes')
+
+    def atomic_append_to_attribute_for_group(self, group: Union[str, ADGroup], attribute: str, value,
+                                             controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically append a value to an attribute for a group in the domain.
+
+        :param group: Either an ADGroup object or string name referencing the group to be modified.
+        :param attribute: A string specifying the name of the LDAP attribute to be appended to.
+        :param value: The value to append to the attribute. Value may either be a primitive, such as a string, bytes,
+                      or a number, if a single value will be appended. Value may also be an iterable such as a set or
+                      a list if a multi-valued attribute will be appended to, in order to append multiple new values
+                      to it at once.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        group = self._validate_group_and_get_group_obj(group)
+        return self.atomic_append_to_attribute_for_object(group, attribute, value, controls,
+                                                          raise_exception_on_failure)
+
+    def atomic_append_to_attributes_for_group(self, group: Union[str, ADGroup], attribute_to_value_map: dict,
+                                              controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically append values to multiple attributes for a group in the domain.
+
+        :param group: Either an ADGroup object or string name referencing the group to be modified.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will be appended. Values may
+                                       also be iterables such as sets and lists if multiple values will be appended
+                                       to the attributes.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        group = self._validate_group_and_get_group_obj(group)
+        return self.atomic_append_to_attributes_for_object(group, attribute_to_value_map, controls,
+                                                           raise_exception_on_failure)
+
+    def overwrite_attribute_for_group(self, group: Union[str, ADGroup], attribute: str, value,
+                                      controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically overwrite the value of an attribute for a group in the domain.
+
+        :param group: Either an ADUser object or string name referencing the group to be modified.
+        :param attribute: A string specifying the name of the LDAP attribute to be overwritten.
+        :param value: The value to set for the attribute. Value may either be a primitive, such as a string, bytes,
+                      or a number, if a single value will be set. Value may also be an iterable such as a set or
+                      a list if a multi-valued attribute will be set.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        group = self._validate_group_and_get_group_obj(group)
+        return self.overwrite_attribute_for_object(group, attribute, value, controls,
+                                                   raise_exception_on_failure)
+
+    def overwrite_attributes_for_group(self, group: Union[str, ADGroup], attribute_to_value_map: dict,
+                                       controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically overwrite values of multiple attributes for a group in the domain.
+
+        :param group: Either an ADGroup object or string name referencing the group to have attributes overwritten.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will set. Values may also be iterables
+                                       such as sets and lists if an attribute is multi-valued and multiple values will
+                                       be set.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        group = self._validate_group_and_get_group_obj(group)
+        return self.overwrite_attributes_for_object(group, attribute_to_value_map, controls,
+                                                    raise_exception_on_failure)
+
+    def atomic_append_to_attribute_for_user(self, user: Union[str, ADUser], attribute: str, value,
+                                            controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically append a value to an attribute for a user in the domain.
+
+        :param user: Either an ADUser object or string name referencing the user to be modified.
+        :param attribute: A string specifying the name of the LDAP attribute to be appended to.
+        :param value: The value to append to the attribute. Value may either be a primitive, such as a string, bytes,
+                      or a number, if a single value will be appended. Value may also be an iterable such as a set or
+                      a list if a multi-valued attribute will be appended to, in order to append multiple new values
+                      to it at once.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        user = self._validate_user_and_get_user_obj(user)
+        return self.atomic_append_to_attribute_for_object(user, attribute, value, controls,
+                                                          raise_exception_on_failure)
+
+    def atomic_append_to_attributes_for_user(self, user: Union[str, ADUser], attribute_to_value_map: dict,
+                                             controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically append values to multiple attributes for a user in the domain.
+
+        :param user: Either an ADUser object or string name referencing the user to be modified.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will be appended. Values may
+                                       also be iterables such as sets and lists if multiple values will be appended
+                                       to the attributes.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        user = self._validate_user_and_get_user_obj(user)
+        return self.atomic_append_to_attributes_for_object(user, attribute_to_value_map, controls,
+                                                           raise_exception_on_failure)
+
+    def overwrite_attribute_for_user(self, user: Union[str, ADUser], attribute: str, value,
+                                     controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically overwrite the value of an attribute for a user in the domain.
+
+        :param user: Either an ADUser object or string name referencing the user to be modified.
+        :param attribute: A string specifying the name of the LDAP attribute to be overwritten.
+        :param value: The value to set for the attribute. Value may either be a primitive, such as a string, bytes,
+                      or a number, if a single value will be set. Value may also be an iterable such as a set or
+                      a list if a multi-valued attribute will be set.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        user = self._validate_user_and_get_user_obj(user)
+        return self.overwrite_attribute_for_object(user, attribute, value, controls,
+                                                   raise_exception_on_failure)
+
+    def overwrite_attributes_for_user(self, user: Union[str, ADUser], attribute_to_value_map: dict,
+                                      controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically overwrite values of multiple attributes for a user in the domain.
+
+        :param user: Either an ADUser object or string name referencing the user to have attributes overwritten.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will set. Values may also be iterables
+                                       such as sets and lists if an attribute is multi-valued and multiple values will
+                                       be set.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        user = self._validate_user_and_get_user_obj(user)
+        return self.overwrite_attributes_for_object(user, attribute_to_value_map, controls,
+                                                    raise_exception_on_failure)
 
     def who_am_i(self):
         """ Return the authorization identity as recognized by the server.
@@ -1814,6 +2057,48 @@ class ADSession:
         This just calls the LDAP connection function, as it's suitable for AD as well.
         """
         return self.ldap_connection.extend.standard.who_am_i()
+
+    def _validate_group_and_get_group_obj(self, group: Union[str, ADGroup]):
+        if isinstance(group, str):
+            # do one lookup for existence for better errors
+            original = group
+            group = self.find_group_by_name(group)
+            if group is None:
+                raise ObjectNotFoundException('No group could be found with the Group object class and name {}'
+                                              .format(original))
+        elif not isinstance(group, ADUser):
+            raise InvalidLdapParameterException('The user specified must be an ADGroup object or a string group name.')
+        return group
+
+    def _validate_obj_and_get_ad_obj(self, ad_object: Union[str, ADObject]):
+        # get distinguished name and confirm object existence as needed
+        if isinstance(ad_object, str):
+            object_dn = ad_object
+            if not ldap_utils.is_dn(ad_object):
+                raise InvalidLdapParameterException('The object specified must be an ADObject object or a string '
+                                                    'distinguished name.')
+            # do one lookup for existence for better errors
+            res = self._find_ad_objects_and_attrs(object_dn, ldap_constants.FIND_ANYTHING_FILTER,
+                                                  BASE, [], 1, ADObject, None)
+            if not res:
+                raise ObjectNotFoundException('No object could be found with distinguished name {}'.format(ad_object))
+            ad_object = res[0]
+        elif not isinstance(ad_object, ADObject):
+            raise InvalidLdapParameterException('The object specified must be an ADObject object or a string '
+                                                'distinguished name.')
+        return ad_object
+
+    def _validate_user_and_get_user_obj(self, user: Union[str, ADUser]):
+        if isinstance(user, str):
+            # do one lookup for existence for better errors
+            original = user
+            user = self.find_user_by_name(user)
+            if user is None:
+                raise ObjectNotFoundException('No user could be found with the User object class and name {}'
+                                              .format(original))
+        elif not isinstance(user, ADUser):
+            raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
+        return user
 
     def __repr__(self):
         conn_repr = self.ldap_connection.__repr__()

@@ -1,4 +1,6 @@
 import binascii
+import collections.abc
+import six
 
 from ldap3 import Connection
 from ldap3.core.exceptions import LDAPInvalidDnError
@@ -34,6 +36,22 @@ def is_dn(anything: str):
         return True
     except LDAPInvalidDnError:
         return False
+
+
+def convert_to_ldap_iterable(anything):
+    """ LDAP and the ldap3 library require that all attributes used in a modification operation be specified
+    in a list. Even if the attribute is single-valued and reads as single-valued, like userAccountControl,
+    modifying it still takes a [new_value].
+    For multi-valued attributes this is still just a list of [new_value1, new_value2] - it's not nested.
+    This function converts values to this format as needed.
+    """
+    if isinstance(anything, dict):
+        raise InvalidLdapParameterException('Dictionaries may not be specified as LDAP values to be set.')
+    # iterables that aren't strings are mostly fine, but we turn any sets or tuples into lists
+    if isinstance(anything, collections.abc.Iterable) and not isinstance(anything, six.string_types):
+        return list(anything)
+    # otherwise make it a 1-item list
+    return [anything]
 
 
 def construct_default_hostnames_for_computer(computer_name: str, domain_dns_name: str):
