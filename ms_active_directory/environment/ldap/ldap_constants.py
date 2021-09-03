@@ -1,6 +1,3 @@
-import copy
-from ldap3.utils.dn import parse_dn
-
 CERTIFICATE_AUTHORITY_OBJECT_CLASS = 'certificationAuthority'
 TRUSTED_DOMAIN_OBJECT_CLASS = 'TrustedDomain'
 COMPUTER_OBJECT_CLASS = 'computer'
@@ -98,41 +95,3 @@ FIND_USER_FILTER = '(objectClass=User)'
 # miscellaneous values we need
 UNKNOWN_USER_POSIX_UID = -1
 UNKNOWN_GROUP_POSIX_GID = -1
-
-
-# the parent of all ADObjects, defined here to avoid risk of circular imports
-
-class ADObject:
-
-    def __init__(self, dn: str, attributes: dict, domain):
-        self.distinguished_name = dn
-        self.domain = domain
-        self.all_attributes = attributes if attributes else {}
-        # used for __repr__
-        self.class_name = 'ADObject'
-
-        # to get the location of an object, we split up all of the DN components and remove the
-        # first component (the object itself) and the domain components. reassembling what remains
-        # gives us the relative dn of the object's container
-        dn_pieces = parse_dn(dn, escape=True)
-        superlative_dn_pieces = dn_pieces[1:]
-        superlative_dn_pieces_without_domain = [piece for piece in superlative_dn_pieces if piece[0].lower() != 'dc']
-        reconstructed_pieces = [piece[0] + '=' + piece[1] + piece[2] for piece in superlative_dn_pieces_without_domain]
-        self.location = ''.join(reconstructed_pieces)
-
-    def get(self, attribute_name: str, unpack_one_item_lists=False):
-        """ Get an attribute about the group that isn't explicitly tracked as a member """
-        val = self.all_attributes.get(attribute_name)
-        # there's a lot of 1-item lists from the ldap3 library
-        if isinstance(val, list) and len(val) == 1 and unpack_one_item_lists:
-            return copy.deepcopy(val[0])
-        return copy.deepcopy(val)
-
-    def __repr__(self):
-        attrs = self.all_attributes.__repr__() if self.all_attributes else 'None'
-        domain = self.domain.__repr__()
-        return ('{type}(dn={dn}, attributes={attrs}, domain={domain})'
-                .format(type=self.class_name, dn=self.distinguished_name, attrs=attrs, domain=domain))
-
-    def __str__(self):
-        return self.__repr__()

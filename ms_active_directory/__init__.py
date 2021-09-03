@@ -1,5 +1,5 @@
-from ms_active_directory.core.ad_computer import (
-    ADComputer
+from ms_active_directory.core.managed_ad_objects import (
+    ManagedADComputer
 )
 
 from ms_active_directory.core.ad_domain import (
@@ -18,7 +18,7 @@ from ms_active_directory.core.ad_session import (
     ADSession,
 )
 
-from ms_active_directory.core.ad_users_and_groups import (
+from ms_active_directory.core.ad_objects import (
     ADGroup,
     ADObject,
     ADUser
