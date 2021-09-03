@@ -26,19 +26,35 @@ from ms_active_directory.exceptions import InvalidComputerParameterException
 logger = logging_utils.get_logger()
 
 
-class ADComputer:
+class ManagedADObject:
 
     def __init__(self, samaccount_name: str, domain, location: str=None,
-                 password: str=None, service_principal_names: List[str]=None,
-                 encryption_types: List[ADEncryptionType]=None, kvno: int=None):
+                 password: str=None):
         self.samaccount_name = samaccount_name
-        self.computer_name = self.samaccount_name[:-1]
-        self.name = self.computer_name
         self.domain = domain
         self.domain_dns_name = self.domain.get_domain_dns_name()
         self.realm = self.domain_dns_name.upper()
         self.location = location
         self.password = password
+
+    def get_domain(self):
+        return self.domain
+
+    def get_domain_dns_name(self):
+        return self.domain_dns_name
+
+    def get_samaccount_name(self):
+        return self.samaccount_name
+
+
+class ManagedADComputer(ManagedADObject):
+
+    def __init__(self, samaccount_name: str, domain, location: str=None,
+                 password: str=None, service_principal_names: List[str]=None,
+                 encryption_types: List[ADEncryptionType]=None, kvno: int=None):
+        super().__init__(samaccount_name, domain, location, password)
+        self.computer_name = self.samaccount_name[:-1]
+        self.name = self.computer_name
         self.service_principal_names = service_principal_names if service_principal_names else []
         self.encryption_types = []
         encryption_types = encryption_types if encryption_types else []
@@ -168,20 +184,11 @@ class ADComputer:
                                                     'name cannot be determined for it.')
         return construct_object_distinguished_name(self.computer_name, self.location, self.domain_dns_name)
 
-    def get_domain(self):
-        return self.domain
-
-    def get_domain_dns_name(self):
-        return self.domain_dns_name
-
     def get_encryption_types(self):
         return self.encryption_types
 
     def get_name(self):
         return self.name
-
-    def get_samaccount_name(self):
-        return self.samaccount_name
 
     def get_server_kerberos_keys(self):
         return self.server_kerberos_keys

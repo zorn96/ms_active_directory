@@ -22,8 +22,8 @@ import ms_active_directory.environment.security.security_config_utils as securit
 import ms_active_directory.environment.security.security_config_constants as security_constants
 import ms_active_directory.environment.security.security_descriptor_utils as sd_utils
 
-from ms_active_directory.core.ad_computer import ADComputer
-from ms_active_directory.core.ad_users_and_groups import ADGroup, ADUser, ADObject
+from ms_active_directory.core.managed_ad_objects import ManagedADComputer
+from ms_active_directory.core.ad_objects import ADComputer, ADGroup, ADUser, ADObject
 from ms_active_directory.environment.security.ad_security_guids import ADRightsGuid
 from ms_active_directory.exceptions import (
     AttributeModificationException,
@@ -214,7 +214,7 @@ class ADSession:
                                               This also allows overriding of some values that are not explicit
                                               keyword arguments in order to avoid over-complication, since most
                                               people won't set them (e.g. userAccountControl).
-        :returns: an ADComputer object representing the computer.
+        :returns: an ManagedADComputer object representing the computer.
         :raises: DomainJoinException if any of our validation of the specified attributes fails or if anything
                  specified conflicts with objects in the domain.
         :raises: ObjectCreationException if we fail to create the computer for a reason unrelated to what we can
@@ -298,15 +298,15 @@ class ADSession:
 
         self._create_object(computer_dn, ldap_constants.OBJECT_CLASSES_FOR_COMPUTER, computer_attributes,
                             sanity_check_for_existence=False)  # we already checked for this
-        return ADComputer(samaccount_name, self.domain, computer_location, computer_password, spns,
-                          encryption_types)
+        return ManagedADComputer(samaccount_name, self.domain, computer_location, computer_password, spns,
+                                 encryption_types)
 
-    def take_over_existing_computer(self, computer: Union[ADComputer, ADObject, str], computer_password: str=None,
+    def take_over_existing_computer(self, computer: Union[ManagedADComputer, ADObject, str], computer_password: str=None,
                                     old_computer_password: str=None):
         """ Use the session to take over a computer in the domain and return a computer object.
         This resets the computer's password so that nobody else can impersonate it, and reads
         the computer's attributes in order to create a computer object and return it.
-        :param computer: This can be an ADComputer or ADObject object representing the computer that should be
+        :param computer: This can be an ManagedADComputer or ADObject object representing the computer that should be
                          taken over, or a string identifier for the computer.  If it is a string, it should be
                          the common name or sAMAccountName of the computer to find in the AD domain, or it can be
                          the distinguished name of a computer object.
@@ -321,7 +321,7 @@ class ADSession:
                                   password will be generated.
         :param old_computer_password: The current password for the computer. This is used to reduce the level of
                                       permissions needed for the takeover operation.
-        :returns: an ADComputer object representing the computer.
+        :returns: an ManagedADComputer object representing the computer.
         :raises: DomainJoinException if any of our validation of the specified attributes fails or if anything
                  specified conflicts with objects in the domain.
         :raises: ObjectNotFoundException if a computer cannot be found based on the name specified.
@@ -334,12 +334,12 @@ class ADSession:
         # if we got an object, we don't know that it has all the attributes we need, so redo the lookup
         if isinstance(computer, ADObject):
             computer = computer.distinguished_name
-        elif isinstance(computer, ADComputer):
+        elif isinstance(computer, ManagedADComputer):
             computer = computer.get_samaccount_name()
 
         # at this point, if we don't have a string, then an invalid type was specified
         if not isinstance(computer, str):
-            raise InvalidLdapParameterException('The specified computer must either be an ADComputer object or an '
+            raise InvalidLdapParameterException('The specified computer must either be an ManagedADComputer object or an '
                                                 'ADObject object representing the computer, or a string identifier for '
                                                 'the computer.')
 
@@ -432,8 +432,8 @@ class ADSession:
         kvno += 1
 
         logger.info('Successfully took over computer with sAMAccountName %s', samaccount_name)
-        return ADComputer(samaccount_name, self.domain, computer_location, computer_password, spns,
-                          encryption_types, kvno=kvno)
+        return ManagedADComputer(samaccount_name, self.domain, computer_location, computer_password, spns,
+                                 encryption_types, kvno=kvno)
 
     # FUNCTIONS FOR FINDING DOMAIN INFORMATION
 
@@ -785,7 +785,7 @@ class ADSession:
         :returns: an ADGroup object or None if the group does not exist.
         :raises: a DuplicateNameException if more than one entry exists with this name.
         """
-        return self._find_by_name_common(group_name, attributes_to_lookup, is_user=False, controls=controls)
+        return self._find_by_name_common(group_name, attributes_to_lookup, ADGroup, controls=controls)
 
     def find_object_by_sid(self, sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
                            attributes_to_lookup: List[str]=None, object_class: str=None,
@@ -837,6 +837,148 @@ class ADSession:
             return results[0]
         return None
 
+    def find_computers_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None,
+                                    size_limit: int=0, controls: List[Control]=None):
+        """ Find all computers that possess the specified attribute with the specified value, and return a list of
+        ADComputer objects.
+
+        :param attribute_name: The LDAP name of the attribute to be used in the search.
+        :param attribute_value: The value that returned computers should possess for the attribute.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computers. Regardless of
+                                     what's specified, the computers' name and object class attributes will be queried.
+        :param size_limit: An integer indicating a limit to place the number of results the search will return.
+                           If not specified, defaults to 0, meaning unlimited.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: a list of ADComputer objects representing computers with the specified value for the specified
+                  attribute.
+        """
+        return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup, size_limit,
+                                                ldap_constants.COMPUTER_OBJECT_CLASS, ADComputer, controls)
+
+    def find_computer_by_common_name(self, computer_name: str, attributes_to_lookup: List[str]=None,
+                                     controls: List[Control]=None):
+        """ Find all computers with a given common name and return a list of ADComputer objects.
+        This is particularly useful when you have multiple computers with the same name in different OUs
+        as a result of a migration, and want to find them so you can combine them.
+
+        :param computer_name: The common name of the computer(s) to be looked up.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computers. Regardless of
+                                     what's specified, the computers' name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: a list of ADComputer objects representing computers with the specified common name.
+        """
+        # build a compound filter for users with this common name
+        search_filter = '(&({cn_attr}={cn}){type_filter})'.format(cn_attr=ldap_constants.AD_ATTRIBUTE_COMMON_NAME,
+                                                                  cn=computer_name,
+                                                                  type_filter=ldap_constants.FIND_COMPUTER_FILTER)
+        # a size limit of 0 means unlimited
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 0, ADComputer, controls)
+        logger.info('%s computers found with common name %s', len(res), computer_name)
+        return res
+
+    def find_computer_by_distinguished_name(self, computer_dn: str, attributes_to_lookup: List[str]=None,
+                                            controls: List[Control]=None):
+        """ Find a Computer in AD based on a specified distinguished name and return it along with any
+        requested attributes.
+        :param computer_dn: The distinguished name of the computer.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computer. Regardless of
+                                     what's specified, the computer's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADComputer object or None if the computer does not exist.
+        """
+        # since the distinguished name may be a relative distinguished name or complete one,
+        # normalize it
+        normalized_rdn = ldap_utils.normalize_object_location_in_domain(computer_dn,
+                                                                        self.domain_dns_name)
+        search_dn = normalized_rdn + ',' + self.domain_search_base
+        res = self._find_ad_objects_and_attrs(search_dn, ldap_constants.FIND_COMPUTER_FILTER, BASE,
+                                              attributes_to_lookup, 1, ADComputer, controls)
+        if not res:
+            return None
+        return res[0]
+
+    def find_computer_by_sam_name(self, computer_name: str, attributes_to_lookup: List[str]=None,
+                                  controls: List[Control]=None):
+        """ Find a Computer in AD based on a specified sAMAccountName name and return it along with any
+        requested attributes.
+        :param computer_name: The sAMAccountName name of the computer. Because a lot of people get a bit confused on
+                              what a computer name, as many systems leave out the trailing $ that's common to many
+                              computer sAMAccountNames when showing it, if computer_name does not end in a trailing $
+                              and no computer can be found with computer_name, a lookup will be attempted for the
+                              computer_name with a trailing $ added.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computer. Regardless of
+                                     what's specified, the computer's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADComputer object or None if the computer does not exist.
+        """
+        # build a compound filter for users with this samaccountname
+        search_filter = '(&({sam_attr}={sam_name}){type_filter})'.format(sam_attr=ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME,
+                                                                         sam_name=computer_name,
+                                                                         type_filter=ldap_constants.FIND_COMPUTER_FILTER)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 1, ADUser, controls)
+        if not res:
+            if computer_name.endswith('$'):
+                return None
+            # if we didn't get a sAMAccountName ending in $, try a lookup for one ending in $
+            alt_computer_name = computer_name + '$'
+            logger.info('No computer results found for sAMAccountName %s - attempting lookup for sAMAccountName %s',
+                        computer_name, alt_computer_name)
+            search_filter = '(&({sam_attr}={sam_name}){type_filter})'.format(sam_attr=ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME,
+                                                                             sam_name=alt_computer_name,
+                                                                             type_filter=ldap_constants.FIND_COMPUTER_FILTER)
+            res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                                  attributes_to_lookup, 1, ADUser, controls)
+            if not res:
+                return None
+        return res[0]
+
+    def find_computer_by_sid(self, computer_sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
+                             attributes_to_lookup: List[str]=None, controls: List[Control]=None):
+        """ Find a Computer in AD given its SID.
+        This function takes in a computer's objectSID and then looks up the computer in AD using it. SIDs are unique
+        so only a single entry can be found at most.
+        The computer SID can be in many formats (well known SID enum, ObjectSID object, canonical SID format,
+        or bytes) and so all 4 possible formats are handled.
+        :param computer_sid: The computer SID. This may either be a well-known SID enum, an ObjectSID object, a string
+                             SID in canonical format (e.g. S-1-1-0), object SID bytes, or the hex representation of
+                             such bytes.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computer. Regardless of
+                                     what's specified, the computer's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADComputer object or None if the computer does not exist.
+        """
+        return self.find_object_by_sid(computer_sid, attributes_to_lookup,
+                                       object_class=ldap_constants.COMPUTER_OBJECT_CLASS, return_type=ADComputer,
+                                       controls=controls)
+
+    def find_computer_by_name(self, computer_name: str, attributes_to_lookup: List[str]=None,
+                              controls: List[Control]=None):
+        """ Find a Computer in AD based on a provided name.
+        This function takes in a generic name which can be either a distinguished name, a common name, or a
+        sAMAccountName, and tries to find a unique computer identified by it and return information on the computer.
+        :param computer_name: The name of the computer, which may be a DN, common name, or sAMAccountName.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computer. Regardless of
+                                     what's specified, the computer's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADComputer object or None if the computer does not exist.
+        :raises: a DuplicateNameException if more than one entry exists with this name.
+        """
+        return self._find_by_name_common(computer_name, attributes_to_lookup, ADComputer, controls=controls)
+
     def find_users_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None,
                                 size_limit: int=0, controls: List[Control]=None):
         """ Find all users that possess the specified attribute with the specified value, and return a list of ADUser
@@ -851,7 +993,7 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
-        :returns: a list of ADUser objects representing groups with the specified value for the specified attribute.
+        :returns: a list of ADUser objects representing users with the specified value for the specified attribute.
         """
         return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup, size_limit,
                                                 ldap_constants.USER_OBJECT_CLASS, ADUser, controls)
@@ -938,7 +1080,7 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
-        :returns: an ADUser object or None if the group does not exist.
+        :returns: an ADUser object or None if the user does not exist.
         """
         return self.find_object_by_sid(user_sid, attributes_to_lookup, object_class=ldap_constants.USER_OBJECT_CLASS,
                                        return_type=ADUser, controls=controls)
@@ -957,9 +1099,9 @@ class ADSession:
         :returns: an ADUser object or None if the user does not exist.
         :raises: a DuplicateNameException if more than one entry exists with this name.
         """
-        return self._find_by_name_common(user_name, attributes_to_lookup, is_user=True, controls=controls)
+        return self._find_by_name_common(user_name, attributes_to_lookup, ADUser, controls=controls)
 
-    def _find_by_name_common(self, name: str, attributes_to_lookup: List[str], is_user: bool=True,
+    def _find_by_name_common(self, name: str, attributes_to_lookup: List[str], lookup_type,
                              controls: List[Control]=None):
         """ A helper function to find things by a unique name.
         Depending on the type of object, it first checks if the name is a DN. We then perform
@@ -971,10 +1113,14 @@ class ADSession:
         dn_lookup_func = self.find_group_by_distinguished_name
         sam_lookup_func = self.find_group_by_sam_name
         cn_lookup_func = self.find_groups_by_common_name
-        if is_user:
+        if lookup_type is ADUser:
             dn_lookup_func = self.find_user_by_distinguished_name
             sam_lookup_func = self.find_user_by_sam_name
             cn_lookup_func = self.find_users_by_common_name
+        elif lookup_type is ADComputer:
+            dn_lookup_func = self.find_computer_by_distinguished_name
+            sam_lookup_func = self.find_computer_by_sam_name
+            cn_lookup_func = self.find_computer_by_common_name
 
         if is_dn:
             return dn_lookup_func(name, attributes_to_lookup, controls=controls)
@@ -985,7 +1131,13 @@ class ADSession:
         if not result_list:
             return None
         if len(result_list) > 1:
-            insert = 'user' if is_user else 'group'
+            insert = 'object'
+            if lookup_type is ADUser:
+                insert = 'user'
+            elif lookup_type is ADGroup:
+                insert = 'group'
+            elif lookup_type is ADComputer:
+                insert = 'computer'
             raise DuplicateNameException('Multiple {}s found with name "{}". Please either repeat the search '
                                          'using a distinguished name or sAMAccountName, or adjust the session '
                                          'search base using set_domain_search_base to limit searches such that only '
@@ -1137,7 +1289,7 @@ class ADSession:
                          may succeed or fail based on their availability.
         :returns: A list of ADGroup objects representing the groups that this user belongs to.
         :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
-        :raises: a InvalidLdapParameterException if the yser name is not a string or ADUser.
+        :raises: a InvalidLdapParameterException if the user name is not a string or ADUser.
         """
         result_dict = self.find_groups_for_entities([user], attributes_to_lookup, self.find_user_by_name, controls)
         return result_dict[user]
@@ -1159,6 +1311,43 @@ class ADSession:
         :raises: a InvalidLdapParameterException if any users are not a string or ADUser.
         """
         return self.find_groups_for_entities(users, attributes_to_lookup, self.find_user_by_name, controls)
+
+    def find_groups_for_computer(self, computer: Union[str, ADComputer], attributes_to_lookup: List[str]=None,
+                                 controls: List[Control]=None):
+        """ Find the groups that a computer belongs to, look up attributes of theirs, and return information about them.
+
+        :param computer: The computer to lookup group memberships for. This can either be an ADComputer or a string
+                        name of an AD computer. If it is a string, the computer will be looked up first to get unique
+                        distinguished name information about it unless it is a distinguished name.
+        :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: A list of ADGroup objects representing the groups that this user belongs to.
+        :raises: a DuplicateNameException if a computer name is specified and more than one entry exists with the name.
+        :raises: a InvalidLdapParameterException if the computer name is not a string or ADComputer.
+        """
+        result_dict = self.find_groups_for_entities([computer], attributes_to_lookup, self.find_computer_by_name,
+                                                    controls)
+        return result_dict[computer]
+
+    def find_groups_for_computers(self, computers: List[Union[str, ADComputer]], attributes_to_lookup: List[str]=None,
+                                  controls: List[Control]=None):
+        """ Find the groups that a list of computers belong to, look up attributes of theirs, and return information
+        about them.
+
+        :param computers: The computers to lookup group memberships for. This can be a list of either ADComputer objects
+                          or string names of AD computers. If they are strings, the computers will be looked up first
+                          to get unique distinguished name information about them unless they are distinguished names.
+        :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: A dictionary mapping computers to lists of ADGroup objects representing the groups that they belong to
+        :raises: a DuplicateNameException if a computer name is specified and more than one entry exists with the name.
+        :raises: a InvalidLdapParameterException if any computers are not a string or ADComputer.
+        """
+        return self.find_groups_for_entities(computers, attributes_to_lookup, self.find_computer_by_name, controls)
 
     # FUNCTIONS FOR MODIFYING MEMBERSHIPS
 
@@ -1251,6 +1440,13 @@ class ADSession:
         return self._something_members_to_or_from_groups(users_to_add, groups_to_add_them_to, self.find_user_by_name,
                                                          stop_and_rollback_on_error, adding=True, controls=controls)
 
+    def add_computers_to_groups(self, computers_to_add: List[Union[str, ADComputer]],
+                                groups_to_add_them_to: List[Union[str, ADGroup]],
+                                stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
+        return self._something_members_to_or_from_groups(computers_to_add, groups_to_add_them_to,
+                                                         self.find_computer_by_name, stop_and_rollback_on_error,
+                                                         adding=True, controls=controls)
+
     def remove_groups_from_groups(self, groups_to_remove: List[Union[str, ADGroup]],
                                   groups_to_remove_them_from: List[Union[str, ADGroup]],
                                   stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
@@ -1263,6 +1459,13 @@ class ADSession:
                                  stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
         return self._something_members_to_or_from_groups(users_to_remove, groups_to_remove_them_from,
                                                          self.find_user_by_name, stop_and_rollback_on_error,
+                                                         adding=False, controls=controls)
+
+    def remove_computers_from_groups(self, computers_to_remove: List[Union[str, ADComputer]],
+                                     groups_to_remove_them_from: List[Union[str, ADGroup]],
+                                     stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
+        return self._something_members_to_or_from_groups(computers_to_remove, groups_to_remove_them_from,
+                                                         self.find_computer_by_name, stop_and_rollback_on_error,
                                                          adding=False, controls=controls)
 
     # Functions for managing permissions within the domain
@@ -1300,6 +1503,23 @@ class ADSession:
         """
         user = self._validate_user_and_get_user_obj(user)
         return self.find_security_descriptor_for_object(user, include_sacl=include_sacl)
+
+    def find_security_descriptor_for_computer(self, computer: Union[str, ADComputer], include_sacl: bool=False):
+        """ Given a computer, find its security descriptor. The security descriptor will be returned as a
+        SelfRelativeSecurityDescriptor object.
+
+        :param computer: The computer for which we will read the security descriptor. This may be an ADComputer object
+                         or a string name identifying the computer (in which case it will be looked up).
+        :param include_sacl: If true, we will attempt to read the System ACL for the user in addition to the
+                             Discretionary ACL and owner information when reading the security descriptor. This is
+                             more privileged than just getting the Discretionary ACL and owner information.
+                             Defaults to False.
+        :raises: ObjectNotFoundException if the computer cannot be found.
+        :raises: InvalidLdapParameterException if the computer specified is not a string or an ADComputer object
+        :raises: SecurityDescriptorDecodeException if we fail to decode the security descriptor.
+        """
+        computer = self._validate_computer_and_get_computer_obj(computer)
+        return self.find_security_descriptor_for_object(computer, include_sacl=include_sacl)
 
     def find_security_descriptor_for_object(self, ad_object: Union[str, ADObject], include_sacl: bool=False):
         """ Given an object, find its security descriptor. The security descriptor will be returned as a
@@ -1402,6 +1622,26 @@ class ADSession:
         """
         user = self._validate_user_and_get_user_obj(user)
         return self.set_object_security_descriptor(user, new_sec_descriptor,
+                                                   raise_exception_on_failure=raise_exception_on_failure)
+
+    def set_computer_security_descriptor(self, computer: Union[str, ADComputer],
+                                         new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
+                                         raise_exception_on_failure: bool=True):
+        """ Set the security descriptor on an Active Directory computer. This can be used to change the owner of a
+        computer in AD, change its permission ACEs, etc.
+
+        :param computer: Either an ADComputer object or string name referencing the computer to be modified.
+        :param new_sec_descriptor: The security descriptor to set on the object.
+        :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
+                                           returning False.
+        :return: A boolean indicating success.
+        :raises: InvalidLdapParameterException if computer is not a string or ADComputer object
+        :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
+                 is true
+        """
+        computer = self._validate_computer_and_get_computer_obj(computer)
+        return self.set_object_security_descriptor(computer, new_sec_descriptor,
                                                    raise_exception_on_failure=raise_exception_on_failure)
 
     def add_permission_to_object_security_descriptor(self, ad_object_to_modify: Union[str, ADObject],
@@ -1579,9 +1819,58 @@ class ADSession:
                                                                  read_property_guids_to_add, write_property_guids_to_add,
                                                                  raise_exception_on_failure=raise_exception_on_failure)
 
+    def add_permission_to_computer_security_descriptor(self, computer: Union[str, ADComputer],
+                                                       sids_to_grant_permissions_to: List[Union[str, sd_utils.ObjectSid, security_constants.WellKnownSID]],
+                                                       access_masks_to_add: List[sd_utils.AccessMask]=None,
+                                                       rights_guids_to_add: List[Union[ADRightsGuid, str]]=None,
+                                                       read_property_guids_to_add: List[str]=None,
+                                                       write_property_guids_to_add: List[str]=None,
+                                                       raise_exception_on_failure: bool=True):
+        """ Add specified permissions to the security descriptor on a computer for specified SIDs.
+        This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
+        privileged actions on the computer, via adding access masks or rights guids respectively. It can also give
+        1 or more users/groups/computers/etc. the ability to read or write specific properties on the user by
+        specifying read or write property guids to add.
+
+        This can, as an example, take a computer and give a user the right to delete it. Or take a computer
+        and give a list of computers the right to read and write the user's owner SID. Or take a computer and let
+        another user reset their password without needing the current one. Etc. Etc.
+
+        :param computer: An ADComputer or String distinguished name, referring to the computer that will have the
+                         permissions on it modified.
+        :param sids_to_grant_permissions_to: SIDs referring to the other entities that will be given new permissions
+                                             on the user. These may be ObjectSID objects, SID strings, or
+                                             WellKnownSIDs.
+        :param access_masks_to_add: A list of AccessMask objects to grant to the SIDs. These represent broad categories
+                                    of actions, such as GENERIC_READ and GENERIC_WRITE.
+        :param rights_guids_to_add: A list of rights guids to grant to the SIDs. These may be specified as strings or
+                                    as ADRightsGuid enums, and represent narrower permissions to grant to the SIDs for
+                                    targeted actions such as Unexpire_Password or Apply_Group_Policy. Some of these
+                                    do not make logical sense to use in all contexts, as some rights guids only have
+                                    meaning in a self-relative context, or only have meaning on some object types.
+                                    It is left up to the caller to decide what is meaningful.
+        :param read_property_guids_to_add: A list of property guids that represent properties of the computer that the
+                                           SIDs will be granted the right to read. These must be strings.
+        :param write_property_guids_to_add: A list of property guids that represent properties of the computer that the
+                                            SIDs will be granted the right to write. These must be strings.
+        :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
+                                           the security descriptor, instead of returning False. defaults to True
+        :return: A boolean indicating if we succeeded in updating the security descriptor.
+        :raises: InvalidLdapParameterException if any inputs are the wrong type.
+        :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
+        :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
+                 is true
+        """
+        computer = self._validate_computer_and_get_computer_obj(computer)
+        return self.add_permission_to_object_security_descriptor(computer, sids_to_grant_permissions_to,
+                                                                 access_masks_to_add, rights_guids_to_add,
+                                                                 read_property_guids_to_add, write_property_guids_to_add,
+                                                                 raise_exception_on_failure=raise_exception_on_failure)
+
     # Various account management functionalities
 
-    def change_password_for_account(self, account, new_password: str, current_password: str):
+    def change_password_for_account(self, account: Union[str, ADUser, ADComputer], new_password: str,
+                                    current_password: str):
         """ Change a password for a user (includes computers) given the new desired password and old desired password.
         When a password is changed, the old password is provided along with the new one, and this significantly reduces
         the permissions needed in order to perform the operation. By default, any user can perform CHANGE_PASSWORD for
@@ -1598,11 +1887,11 @@ class ADSession:
                   will be returned depending on whether the ldap connection for this session has "raise_exceptions"
                   set to True or not.
         """
-        account = self._validate_user_and_get_user_obj(account)
+        account = self._validate_user_and_get_user_obj(account, can_be_computer=True)
         account_dn = account.distinguished_name
         return self.ldap_connection.extend.microsoft.modify_password(account_dn, new_password, current_password)
 
-    def reset_password_for_account(self, account, new_password: str):
+    def reset_password_for_account(self, account: Union[str, ADUser, ADComputer], new_password: str):
         """ Resets a password for a user (includes computers) to a new desired password.
         To reset a password, a new password is provided to replace the current one without providing the current
         password. This is a privileged operation and maps to the RESET_PASSWORD permission in AD.
@@ -1616,7 +1905,7 @@ class ADSession:
         """
         return self.change_password_for_account(account, new_password, None)
 
-    def disable_account(self, account):
+    def disable_account(self, account: Union[str, ADUser, ADComputer]):
         """ Disable a user account.
         :param account: The string name of the user/computer account to disable. This may either be a
                         sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
@@ -1630,6 +1919,7 @@ class ADSession:
             account = account.distinguished_name
 
         if isinstance(account, str):
+            # this will find users and computers because computers are users
             account_obj = self.find_user_by_name(account, attributes_to_lookup=[ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL])
             if account_obj is None:
                 raise ObjectNotFoundException('No account could be found with the User object class and name {}'
@@ -1657,7 +1947,7 @@ class ADSession:
             logger.debug('Result of modifying user account control to disable %s: %s', account_dn, result)
         return success
 
-    def enable_account(self, account):
+    def enable_account(self, account: Union[str, ADComputer, ADUser]):
         """ Enable a user account.
         :param account: The string name of the user/computer account to enable. This may either be a
                         sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
@@ -1671,6 +1961,7 @@ class ADSession:
             account = account.distinguished_name
 
         if isinstance(account, str):
+            # this will find users and computers because computers are users
             account_obj = self.find_user_by_name(account, attributes_to_lookup=[ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL])
             if account_obj is None:
                 raise ObjectNotFoundException('No account could be found with the User object class and name {}'
@@ -1698,7 +1989,7 @@ class ADSession:
             logger.debug('Result of modifying user account control to disable %s: %s', account_dn, result)
         return success
 
-    def unlock_account(self, account):
+    def unlock_account(self, account: Union[str, ADComputer, ADUser]):
         """ Unlock a user who's been locked out for some period of time.
         :param account: The string name of the user/computer account that has been locked out. This may either be a
                         sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
@@ -1707,7 +1998,7 @@ class ADSession:
                   will be returned depending on whether the ldap connection for this session has "raise_exceptions"
                   set to True or not.
         """
-        account = self._validate_user_and_get_user_obj(account)
+        account = self._validate_user_and_get_user_obj(account, can_be_computer=True)
         account_dn = account.distinguished_name
         return self.ldap_connection.extend.microsoft.unlock_account(account_dn)
 
@@ -2049,6 +2340,102 @@ class ADSession:
         return self.overwrite_attributes_for_object(user, attribute_to_value_map, controls,
                                                     raise_exception_on_failure)
 
+    def atomic_append_to_attribute_for_computer(self, computer: Union[str, ADComputer], attribute: str, value,
+                                                controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically append a value to an attribute for a computer in the domain.
+
+        :param computer: Either an ADComputer object or string name referencing the computer to be modified.
+        :param attribute: A string specifying the name of the LDAP attribute to be appended to.
+        :param value: The value to append to the attribute. Value may either be a primitive, such as a string, bytes,
+                      or a number, if a single value will be appended. Value may also be an iterable such as a set or
+                      a list if a multi-valued attribute will be appended to, in order to append multiple new values
+                      to it at once.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        computer = self._validate_computer_and_get_computer_obj(computer)
+        return self.atomic_append_to_attribute_for_object(computer, attribute, value, controls,
+                                                          raise_exception_on_failure)
+
+    def atomic_append_to_attributes_for_computer(self, computer: Union[str, ADComputer], attribute_to_value_map: dict,
+                                                 controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically append values to multiple attributes for a computer in the domain.
+
+        :param computer: Either an ADComputer object or string name referencing the computer to be modified.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will be appended. Values may
+                                       also be iterables such as sets and lists if multiple values will be appended
+                                       to the attributes.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        computer = self._validate_computer_and_get_computer_obj(computer)
+        return self.atomic_append_to_attributes_for_object(computer, attribute_to_value_map, controls,
+                                                           raise_exception_on_failure)
+
+    def overwrite_attribute_for_computer(self, computer: Union[str, ADComputer], attribute: str, value,
+                                         controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically overwrite the value of an attribute for a computer in the domain.
+
+        :param computer: Either an ADComputer object or string name referencing the computer to be modified.
+        :param attribute: A string specifying the name of the LDAP attribute to be overwritten.
+        :param value: The value to set for the attribute. Value may either be a primitive, such as a string, bytes,
+                      or a number, if a single value will be set. Value may also be an iterable such as a set or
+                      a list if a multi-valued attribute will be set.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        computer = self._validate_computer_and_get_computer_obj(computer)
+        return self.overwrite_attribute_for_object(computer, attribute, value, controls,
+                                                   raise_exception_on_failure)
+
+    def overwrite_attributes_for_computer(self, computer: Union[str, ADComputer], attribute_to_value_map: dict,
+                                          controls: List[Control]=None, raise_exception_on_failure: bool=True):
+        """ Atomically overwrite values of multiple attributes for a computer in the domain.
+
+        :param computer: Either an ADComputer object or string name referencing the computer to have attributes
+                         overwritten.
+        :param attribute_to_value_map: A dictionary mapping string LDAP attribute names to values that will be used
+                                       in the modification operation. Values may either be primitives, such as strings,
+                                       bytes, and numbers if a single value will set. Values may also be iterables
+                                       such as sets and lists if an attribute is multi-valued and multiple values will
+                                       be set.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        computer = self._validate_computer_and_get_computer_obj(computer)
+        return self.overwrite_attributes_for_object(computer, attribute_to_value_map, controls,
+                                                    raise_exception_on_failure)
+
     def who_am_i(self):
         """ Return the authorization identity as recognized by the server.
         This can be helpful when a script is provided with an identity in one form that is used to start a session
@@ -2088,17 +2475,33 @@ class ADSession:
                                                 'distinguished name.')
         return ad_object
 
-    def _validate_user_and_get_user_obj(self, user: Union[str, ADUser]):
+    def _validate_user_and_get_user_obj(self, user: Union[str, ADUser], can_be_computer=False):  # computers are users
         if isinstance(user, str):
             # do one lookup for existence for better errors
             original = user
+            # computers are users so this will actually work whether can_be_computer is true or false
             user = self.find_user_by_name(user)
             if user is None:
                 raise ObjectNotFoundException('No user could be found with the User object class and name {}'
                                               .format(original))
         elif not isinstance(user, ADUser):
+            if can_be_computer and isinstance(user, ADComputer):
+                return user
             raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
         return user
+
+    def _validate_computer_and_get_computer_obj(self, computer: Union[str, ADComputer]):
+        if isinstance(computer, str):
+            # do one lookup for existence for better errors
+            original = computer
+            computer = self.find_computer_by_name(computer)
+            if computer is None:
+                raise ObjectNotFoundException('No computer could be found with the Computer object class and name {}'
+                                              .format(original))
+        elif not isinstance(computer, ADUser):
+            raise InvalidLdapParameterException('The computer specified must be an ADComputer object or a string '
+                                                'computer name.')
+        return computer
 
     def __repr__(self):
         conn_repr = self.ldap_connection.__repr__()
