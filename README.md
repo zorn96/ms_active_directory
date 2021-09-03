@@ -7,8 +7,8 @@ communication for speed, join a computer to the domain, and look up information
 about users and groups in the domain.
 
 It primarily builds on the LDAP protocol, and supports LDAP over TLS with channel bindings,
-and all LDAP basic, NTLM, and SASL authentication mechanisms supported by the `ldap3` python
-library.
+and all LDAP basic, NTLM, and SASL authentication mechanisms (e.g. Kerberos) supported by the
+`ldap3` python library.
 
 **Author**: Azaria Zornberg
 \
@@ -18,14 +18,14 @@ library.
 1. Joining a computer to a domain, either by creating a new computer account or taking over an existing
    account.
 2. Discovering domain resources and properties, optimizing domain communication for the network
-3. Finding users and groups based on a variety of properties (e.g. name, SID, user-specified properties)
-4. Querying information about users, groups, and generic objects
-5. Looking up user and group memberships
-6. Adding and removing users and groups to and from other groups
-7. Account management functionality, such as password changes/resets, enabling, disabling, and unlocking accounts
-8. Looking up information about the permissions set on a user, group, or generic object
-9. Adding permissions to the security descriptor for a user, group, or generic object
-10. Support for updating attributes of users, groups, and generic objects. Support exists for atomically appending 
+3. Finding users, computers, and groups based on a variety of properties (e.g. name, SID, user-specified properties)
+4. Querying information about users, computers, groups, and generic objects
+5. Looking up user, computer, and group memberships
+6. Adding and removing users, computers, and groups to and from other groups
+7. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
+8. Looking up information about the permissions set on a user, computer, group, or generic object
+9. Adding permissions to the security descriptor for a user, computer, group, or generic object
+10. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
     or overwriting values.
 
 
@@ -254,7 +254,7 @@ from ms_active_directory import join_ad_domain
 
 comp = join_ad_domain('example.com', 'Administrator@example.com', 'example-password')
 ```
-The `join_ad_domain` function returns an `ADComputer` object with many helpful functions
+The `join_ad_domain` function returns a `ManagedADComputer` object with many helpful functions
 describing properties of the created computer.
 
 This will use the local hostname of the machine running this code as the computer name.
@@ -400,16 +400,16 @@ domain = ADDomain(domain_dns_name, site=site,
 domain.join_by_taking_over_existing_computer(user, password, computer_name=existing_computer_name)
 ```
 
-# Managing users and groups
+# Managing users, computers, and groups
 
-The library provides a number of different functions for finding users and groups by different
+The library provides a number of different functions for finding users, computers, and groups by different
 identifiers, and for querying information about them.
-It also has functions for checking their memberships and adding or removing users and groups
+It also has functions for checking their memberships and adding or removing users, computers, and groups
 to or from groups.
 
-## Looking up users, groups, and information about them
+## Looking up users, computers, groups, and information about them
 
-Users and groups can both be looked up by one of:
+Users, computers, and groups can both be looked up by one of:
 - sAMAccountName
 - distinguished name
 - common name
@@ -423,7 +423,12 @@ groups by `sAMAccountName` returns a single result.
 `sAMAccountName` was a user's windows logon name in older versions of windows,
 and may be referred to as such in some documentation.
 
-When looking up users and groups, you can also query for additional information
+For computers, the standard convention is for their `sAMAccountName` to end with
+a `$`, but many tools/docs leave that out. So if a `sAMAccountName` is specified
+that does not end with a `$` and cannot be found, a lookup will also be
+attempted after adding a `$` to the end.
+
+When looking up users, computers, and groups, you can also query for additional information
 about them by specifying a list of LDAP attributes.
 ``` 
 from ms_active_directory import ADDomain
@@ -443,7 +448,7 @@ A distinguished name is unique within a forest, and so looking up users or
 groups by it returns a single result.
 A distinguished name should not be escaped when provided to the search function.
 
-When looking up users and groups, you can also query for additional information
+When looking up users, computers, and groups, you can also query for additional information
 about them by specifying a list of LDAP attributes.
 ``` 
 from ms_active_directory import ADDomain
@@ -463,7 +468,7 @@ print(group.get('gidNumber'))
 A common name is not unique within a domain, and so looking up users or
 groups by it returns a list of results, which may have 0 or more entries.
 
-When looking up users and groups, you can also query for additional information
+When looking up users, computers, and groups, you can also query for additional information
 about them by specifying a list of LDAP attributes.
 ``` 
 from ms_active_directory import ADDomain
@@ -482,7 +487,7 @@ for group in groups:
 ```
 
 ### Look up by generic name
-You can also query by a generic "name" and the library will attempt to find a
+You can also query by a generic "name", and the library will attempt to find a
 unique user or group with that name. The library will either lookup by DN or will
 attempt `sAMAccountName` and common name lookups depending on the name format.
 
@@ -503,8 +508,8 @@ print(group.get('gidNumber'))
 ```
 
 ### Look up by attribute
-You can also query for users or groups that possess a certain value for a
-specified attribute. This can produce any number of results so a list is
+You can also query for users, computers, or groups that possess a certain value for a
+specified attribute. This can produce any number of results, so a list is
 returned.
 ``` 
 from ms_active_directory import ADDomain
@@ -525,17 +530,17 @@ for group in groups:
     print(group.get('gidNumber'))
 ```
 
-## Querying user and group membership
-You can also look up the groups that a user belongs to, or the groups that a group belongs
-to. Active Directory supports nested groups, which is why there's both `user->groups` and
-`group->groups` mapping capability.
+## Querying user, computer, and group membership
+You can also look up the groups that a user belongs to, the groups that a computer belongs to,
+or the groups that a group belongs to. Active Directory supports nested groups, which is why
+there's `user->groups`, `computer->groups`, and `group->groups` mapping capability.
 
 When querying the membership information for users or groups, the input type for any
-user or group must either be a string name identifying the user or group as described in the prior
-section, or must be an `ADUser` or `ADGroup` object returned by one of the functions described
+user or group must either be a string name identifying the user, computer, or group as described in the prior
+section, or must be an `ADUser`, `ADComputer`, or `ADGroup` object returned by one of the functions described
 in the prior section.
 
-Similarly to looking up users and groups, you can query for attributes of the parent groups
+Similarly to looking up users, computers, and groups, you can query for attributes of the parent groups
 by providing a list of LDAP attributes to look up for them.
 
 ``` 
@@ -567,9 +572,9 @@ second_level_groups_res1 = session.find_groups_for_group(example_group_obj, desi
 second_level_groups_res2 = session.find_groups_for_group(example_group_dn, desired_group_attrs)
 ```
 
-You can also query `users->groups` and `groups->groups` to find the memberships of multiple
-users and groups, and the library will make a minimal number of queries to determine membership;
-it will be more efficient that doing a `user->groups` for each user (or similar for groups).
+You can also query `users->groups`, `computers->groups`, and `groups->groups` to find the memberships of multiple
+users, computers, and groups, and the library will make a minimal number of queries to determine membership;
+it will be more efficient that doing a `user->groups` for each user (or similar for computers and groups).
 The result will be a map that maps the input users or groups to lists of parent groups.
 
 The input lists' elements must be the same format as what's provided when looking up group
@@ -651,19 +656,24 @@ print(succeeeded)
 Adding groups to other groups works exactly the same way as adding users to groups, but
 the function is called `add_groups_to_groups` and both inputs are lists of groups.
 
-## Removing users or groups from groups
+## Adding computers to groups
 
-Removing users or groups from groups works identically to adding users or groups to groups,
+Adding computers to groups works exactly the same way as adding users to groups, but
+the function is called `add_computers_to_groups` and the first input is a list of computers.
+
+## Removing users, computers, or groups from groups
+
+Removing users, computers, or groups from groups works identically to adding users, computers, or groups to groups,
 including input format, idempotency, and rollback functionality.
-The only difference is that the functions are called `remove_users_from_groups` and
+The only difference is that the functions are called `remove_users_from_groups`, `remove_computers_from_groups`, and
 `remove_groups_from_groups` instead.
 
 
-## Updating user or group attributes.
+## Updating user, computer, or group attributes.
 You can use this library to modify the values of various LDAP attributes on
-users, groups, or generic objects.
+users, computers, groups, or generic objects.
 
-Users and groups provide the convenient name lookup functionality mentioned above,
+Users, computers, and groups provide the convenient name lookup functionality mentioned above,
 while for generic objects you either need to pass an `ADObject` or a distinguished name.
 
 ### Appending to one or more attributes
@@ -693,7 +703,8 @@ success = session.atomic_append_to_attributes_for_user(user_name, update_map)
 ```
 You can also perform these actions on groups and objects using the similarly named
 functions `atomic_append_to_attribute_for_group`, `atomic_append_to_attributes_for_group`,
-`atomic_append_to_attribute_for_object`, and `atomic_append_to_attributes_for_object`
+`atomic_append_to_attribute_for_computer`, `atomic_append_to_attributes_for_computer`,
+`atomic_append_to_attribute_for_object`, and `atomic_append_to_attributes_for_object`.
 
 ### Overwriting one or more attributes
 If you want to totally replace the value of an attribute, that's supported as well.
