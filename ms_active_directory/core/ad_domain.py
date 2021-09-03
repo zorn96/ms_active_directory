@@ -20,6 +20,7 @@ from ldap3 import (
     SIMPLE,
     Tls,
 )
+from ldap3.core.connection import SASL_AVAILABLE_MECHANISMS
 from ssl import (
     OP_NO_SSLv2,
     OP_NO_SSLv3,
@@ -413,6 +414,14 @@ class ADDomain:
         # were discovered automatically (in which case they're ordered by RTT), so use the FIRST strategy
         # to either contact the first preferred server or the fastest/closest server
         server_pool = ServerPool(servers=self.ldap_servers, pool_strategy=FIRST)
+        # if the authentication mechanism is a SASL mechanism, set the authentication mechanism to SASL
+        # and move the current authentication mechanism to be the sasl_mechanism in the kwargs
+
+        # ntlm isn't real SASL, but Kerberos, EXTERNAL, etc. are.
+        if authentication_mechanism in SASL_AVAILABLE_MECHANISMS:
+            kwargs['sasl_mechanism'] = authentication_mechanism
+            authentication_mechanism = SASL
+
         # if no client strategy is specified, default to restartable. AD tends to close idle connections;
         # also if a user specified the LDAP servers, they may have used a hostname that has many servers
         # behind it (like just the domain name), which can cause connections to break if they're using TLS
@@ -476,10 +485,6 @@ class ADDomain:
         if check_name_format:
             formatted_name = format_computer_name_for_authentication(computer_name, self.domain,
                                                                      authentication_mechanism)
-        # ntlm isn't real SASL, but Kerberos, EXTERNAL, etc. are
-        if authentication_mechanism != NTLM:
-            kwargs['sasl_mechanism'] = authentication_mechanism
-            authentication_mechanism = SASL
         return self._create_connection(formatted_name, computer_password, authentication_mechanism, **kwargs)
 
     def create_session_as_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
