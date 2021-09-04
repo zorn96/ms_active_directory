@@ -9,8 +9,8 @@ from typing import List
 
 
 from ms_active_directory import logging_utils
+from ms_active_directory.core.ad_objects import ADObject
 from ms_active_directory.environment.ldap.ldap_constants import (
-    ADObject,
     AD_USERNAME_RESTRICTED_CHARS,
     SAM_ACCOUNT_NAME_LENGTH,
     LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT,
