@@ -1,3 +1,5 @@
+from typing import Union
+
 from ms_active_directory import logging_utils
 
 from ms_active_directory.environment.kerberos.kerberos_constants import (
@@ -22,7 +24,7 @@ class RawKerberosKey:
     only to the password used, the salt, and the encryption type. It can therefore be used to
     generate usable kerberos keys for either accepting or initiating GSS authentication.
     """
-    def __init__(self, enc_type, key_bytes: bytes):
+    def __init__(self, enc_type: Union[ADEncryptionType, str], key_bytes: bytes):
         # leave enc_type flexible. it can be either an ADEncryption type or a string depending on whether
         # we generate this key ourselves for an AD account or read it in from a keytab file
         self.encryption_type = enc_type

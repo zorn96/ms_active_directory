@@ -1,6 +1,10 @@
 import copy
 
 from ldap3.utils.dn import parse_dn
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ms_active_directory.core.ad_domain import ADDomain
+
 
 from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_COMMON_NAME,
@@ -19,7 +23,7 @@ from ms_active_directory.environment.ldap.ldap_constants import (
 
 class ADObject:
 
-    def __init__(self, dn: str, attributes: dict, domain):
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
         self.distinguished_name = dn
         self.domain = domain
         self.all_attributes = attributes if attributes else {}
@@ -55,7 +59,7 @@ class ADObject:
 
 class ADComputer(ADObject):
 
-    def __init__(self, dn: str, attributes: dict, domain):
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
         super().__init__(dn, attributes, domain)
         # used for __repr__
         self.class_name = 'ADComputer'
@@ -70,7 +74,7 @@ class ADComputer(ADObject):
 
 class ADUser(ADObject):
 
-    def __init__(self, dn: str, attributes: dict, domain):
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
         super().__init__(dn, attributes, domain)
         # used for __repr__
         self.class_name = 'ADUser'
@@ -83,7 +87,7 @@ class ADUser(ADObject):
 
 class ADPosixUser(ADUser):
 
-    def __init__(self, dn: str, attributes: dict, domain):
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
         super().__init__(dn, attributes, domain)
         # used for __repr__
         self.class_name = 'ADPosixUser'
@@ -110,7 +114,7 @@ class ADPosixUser(ADUser):
 
 class ADGroup(ADObject):
 
-    def __init__(self, dn: str, attributes: dict, domain):
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
         super().__init__(dn, attributes, domain)
         # used for __repr__
         self.class_name = 'ADGroup'
@@ -123,7 +127,7 @@ class ADGroup(ADObject):
 
 class ADPosixGroup(ADGroup):
 
-    def __init__(self, dn: str, attributes: dict, domain):
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
         super().__init__(dn, attributes, domain)
         # used for __repr__
         self.class_name = 'ADPosixGroup'

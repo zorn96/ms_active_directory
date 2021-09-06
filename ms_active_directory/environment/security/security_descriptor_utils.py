@@ -67,7 +67,7 @@ from ms_active_directory.exceptions import (
 
 
 def add_permissions_to_security_descriptor_dacl(current_security_descriptor_bytes: bytes, sid_string: str,
-                                                access_masks: List=None, privilege_guids: List[str]=None,
+                                                access_masks: List['AccessMask']=None, privilege_guids: List[str]=None,
                                                 read_property_guids: List[str]=None,
                                                 write_property_guids: List[str]=None):
     """ Given a bytestring for the current security descriptor on an Active Directory object,
@@ -90,7 +90,7 @@ def add_permissions_to_security_descriptor_dacl(current_security_descriptor_byte
 
 
 def add_permissions_to_security_descriptor(current_security_descriptor, sid_string: str,
-                                           access_masks: List=None, privilege_guids: List[str]=None,
+                                           access_masks: List['AccessMask']=None, privilege_guids: List[str]=None,
                                            read_property_guids: List[str]=None,
                                            write_property_guids: List[str]=None):
     """ Given a security descriptor object representing the DACL bytes on an Active Directory object,
@@ -132,7 +132,7 @@ def add_permissions_to_security_descriptor(current_security_descriptor, sid_stri
     return current_security_descriptor
 
 
-def create_ace_for_allow_access(sid_string: str, access_mask):
+def create_ace_for_allow_access(sid_string: str, access_mask: 'AccessMask'):
     """ Construct an Access Control Entry (ACE) granting the provided SID the provided permission
     on the object to which the ACE is attached.
     """
@@ -279,7 +279,7 @@ class Structure(object):
     structure = ()
     REPR_NAME = 'Structure'
 
-    def __init__(self, data=None, parent_structure=None):
+    def __init__(self, data: bytes=None, parent_structure: 'Structure'=None):
         self.fields = {}
         self.raw_data = data
         self.parent_structure = parent_structure
@@ -288,7 +288,7 @@ class Structure(object):
         else:
             self.data = None
 
-    def get_data(self, force_recompute=False):
+    def get_data(self, force_recompute: bool=False):
         """ If we've ever computed and packed our data before, and not changed since then, return
         that.
         Otherwise, iterate through our structure, pack each field, and return that data.
@@ -314,21 +314,21 @@ class Structure(object):
         self.data = data
         return data
 
-    def get_field_format_spec(self, field_name):
+    def get_field_format_spec(self, field_name: str):
         """ Get the format string in our structure for a given field. """
         for field in self.structure:
             if field[0] == field_name:
                 return field[1]
         raise SecurityDescriptorDecodeException("Field %s not found" % field_name)
 
-    def find_length_field_for_other_field(self, field_name):
+    def find_length_field_for_other_field(self, field_name: str):
         """ Given a field with a spec that may override the real length of the field using another
         field, get the name of the field that overrides the value.
         If the spec doesn't have an override field, this will return None.
         """
         return self.find_override_descriptor_for_field(field_name, LENGTH_DESCRIPTOR_FMT)
 
-    def find_override_descriptor_for_field(self, field_name, descriptor_fmt):
+    def find_override_descriptor_for_field(self, field_name: str, descriptor_fmt: str):
         """ Given a field with a spec that may override some attribute of the field using another
         field, get the name of the field that overrides the value.
         If the spec doesn't have an override field, this will return None.
@@ -339,14 +339,14 @@ class Structure(object):
                 return field[0]
         return None
 
-    def calc_pack_size_for_field(self, field_name, format_spec=None):
+    def calc_pack_size_for_field(self, field_name: str, format_spec: str=None):
         """ Calculate the size needed to pack the value in the given field. """
         if format_spec is None:
             format_spec = self.get_field_format_spec(field_name)
 
         return self.calc_pack_or_unpack_size(format_spec, self[field_name])
 
-    def calc_pack_or_unpack_size(self, format_spec, data, field_name=None, is_unpack=False):
+    def calc_pack_or_unpack_size(self, format_spec: str, data: bytes, field_name: str=None, is_unpack: bool=False):
         """ Calculate the size needed to pack or unpack the given data according to a format
         specification for how the data should be encoded.
         Optionally, the name of the field can be provided. If it is, then we'll check if it has
@@ -389,7 +389,7 @@ class Structure(object):
         # struct like specifier
         return calcsize(format_spec)
 
-    def pack_field(self, field_name, format_spec=None):
+    def pack_field(self, field_name: str, format_spec: str=None):
         """ Pack an individual field's value according to its format specification so we can get
         the bytes for the field.
         """
@@ -405,7 +405,7 @@ class Structure(object):
 
         return ans
 
-    def parse_structure_from_bytes(self, data):
+    def parse_structure_from_bytes(self, data: bytes):
         """ Given data, unpack it based on the structure we have and build a dictionary mapping
         each field to the appropriately decoded piece of data.
         """
@@ -436,7 +436,7 @@ class Structure(object):
 
         return self
 
-    def pack(self, format_spec, data):
+    def pack(self, format_spec: str, data: bytes):
         """ Given a format specification for encoding data, and the data to encode, pack the data
         into bytes according to our specification.
         """
@@ -513,7 +513,7 @@ class Structure(object):
         # struct like specifier
         return pack(format_spec, data)
 
-    def unpack(self, format_spec, data, data_class_or_code=b):
+    def unpack(self, format_spec: str, data: bytes, data_class_or_code=b):
         """ Given a format specification, data to unpack, and the class or encoding to use for
         unpacking the data (bytes-like by default), unpack the data according to the format and
         return it.
@@ -588,15 +588,15 @@ class Structure(object):
         if self.parent_structure is not None:
             self.parent_structure.reset_data()
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: str):
         del self.fields[key]
         # force a recompute the next time someone tries to get data, since things have changed
         self.reset_data()
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: str):
         return self.fields[key]
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: str, value):
         self.fields[key] = value
         # force a recompute the next time someone tries to get data, since things have changed
         self.reset_data()
@@ -608,7 +608,7 @@ class Structure(object):
         # our data cannot necessarily be encoded as a string, so convert it to hex
         return '0x' + binascii.hexlify(self.get_data()).decode('UTF-8')
 
-    def __eq__(self, other):
+    def __eq__(self, other: 'Structure'):
         if not isinstance(other, Structure):
             return False
         return other.get_data() == self.get_data()
@@ -718,7 +718,7 @@ class SelfRelativeSecurityDescriptor(Structure):
         else:
             self[DACL] = b''
 
-    def get_data(self, force_recompute=False):
+    def get_data(self, force_recompute: bool=False):
         headerlen = 20
         # Reconstruct the security descriptor
         # flags are currently not set automatically, so if we changed a top level flag around
@@ -780,14 +780,14 @@ class ACE(Structure):
     )
     REPR_NAME = 'ACE'
 
-    def parse_structure_from_bytes(self, data):
+    def parse_structure_from_bytes(self, data: bytes):
         # This will parse the header
         Structure.parse_structure_from_bytes(self, data)
         # Now we parse the ACE body according to its type
         self[ACE_TYPE_NAME] = ACE_TYPE_MAP[self[ACE_TYPE]].__name__
         self[ACE_BODY] = ACE_TYPE_MAP[self[ACE_TYPE]](data=self[ACE_BODY], parent_structure=self)
 
-    def get_data(self, force_recompute=False):
+    def get_data(self, force_recompute: bool=False):
         if ACE_SIZE not in self.fields:
             # include our 4 byte header size in the ACE size, in addition to the size of our body
             self[ACE_SIZE] = len(self[ACE_BODY].get_data(force_recompute=force_recompute)) + 4
@@ -1123,7 +1123,7 @@ class ACL(Structure):
     REPR_NAME = 'ACL'
     aces = []
 
-    def parse_structure_from_bytes(self, data):
+    def parse_structure_from_bytes(self, data: bytes):
         self.aces = []
         Structure.parse_structure_from_bytes(self, data)
         for i in range(self[ACE_COUNT]):
@@ -1136,7 +1136,7 @@ class ACL(Structure):
             self[DATA] = self[DATA][ace[ACE_SIZE]:]
         self[DATA] = self.aces
 
-    def get_data(self, force_recompute=False):
+    def get_data(self, force_recompute: bool=False):
         self[ACE_COUNT] = len(self.aces)
         # We modify the data field to be able to use the
         # parent class parsing
@@ -1147,18 +1147,18 @@ class ACL(Structure):
         self[DATA] = self.aces
         return data
 
-    def append_aces(self, new_aces):
+    def append_aces(self, new_aces: List[ACE]):
         self.aces.extend(new_aces)
         self.reset_data()
 
-    def append_ace(self, new_ace):
+    def append_ace(self, new_ace: ACE):
         self.aces.append(new_ace)
         self.reset_data()
 
-    def prepend_aces(self, new_aces):
+    def prepend_aces(self, new_aces: List[ACE]):
         self.aces = new_aces + self.aces
         self.reset_data()
 
-    def prepend_ace(self, new_ace):
+    def prepend_ace(self, new_ace: ACE):
         self.aces = [new_ace] + self.aces
         self.reset_data()

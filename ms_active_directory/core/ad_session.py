@@ -1,4 +1,3 @@
-import collections.abc
 import copy
 import socket
 import ssl
@@ -13,7 +12,9 @@ from ldap3 import (
     SUBTREE,
 )
 from ldap3.protocol.rfc4511 import Control
-from typing import List, Union
+from typing import List, Union, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ms_active_directory.core.ad_domain import ADDomain
 
 import ms_active_directory.environment.constants as constants
 import ms_active_directory.environment.ldap.ldap_format_utils as ldap_utils
@@ -43,7 +44,7 @@ logger = logging_utils.get_logger()
 
 class ADSession:
 
-    def __init__(self, ldap_connection: Connection, domain, search_paging_size=100):
+    def __init__(self, ldap_connection: Connection, domain: 'ADDomain', search_paging_size: int=100):
         self.ldap_connection = ldap_connection
         self.domain = domain
         self.domain_dns_name = self.domain.get_domain_dns_name()

@@ -1,6 +1,8 @@
 from ms_active_directory import logging_utils
 
-from typing import List
+from typing import List, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ms_active_directory.core.ad_domain import ADDomain
 
 from ms_active_directory.core.ad_kerberos_keys import (
     GssKerberosKey,
@@ -28,7 +30,7 @@ logger = logging_utils.get_logger()
 
 class ManagedADObject:
 
-    def __init__(self, samaccount_name: str, domain, location: str=None,
+    def __init__(self, samaccount_name: str, domain: 'ADDomain', location: str=None,
                  password: str=None):
         self.samaccount_name = samaccount_name
         self.domain = domain
@@ -49,7 +51,7 @@ class ManagedADObject:
 
 class ManagedADComputer(ManagedADObject):
 
-    def __init__(self, samaccount_name: str, domain, location: str=None,
+    def __init__(self, samaccount_name: str, domain: 'ADDomain', location: str=None,
                  password: str=None, service_principal_names: List[str]=None,
                  encryption_types: List[ADEncryptionType]=None, kvno: int=None):
         super().__init__(samaccount_name, domain, location, password)
@@ -296,21 +298,21 @@ class ManagedADComputer(ManagedADObject):
         logger.debug('Generated %s new kerberos keys for new service principal names %s set on computer %s locally',
                      len(new_kerberos_keys), service_principal_names, self.computer_name)
 
-    def write_full_keytab_file_for_computer(self, file_path):
+    def write_full_keytab_file_for_computer(self, file_path: str):
         logger.debug('Writing full key file for computer %s to %s', self.computer_name, file_path)
         data = self.get_full_keytab_file_bytes_for_computer()
         self._write_keytab_data(file_path, data)
         logger.info('Successfully wrote full key file with %s keys for computer %s to %s',
                     len(self.kerberos_keys), self.computer_name, file_path)
 
-    def write_server_keytab_file_for_computer(self, file_path):
+    def write_server_keytab_file_for_computer(self, file_path: str):
         logger.debug('Writing server key file for computer %s to %s', self.computer_name, file_path)
         data = self.get_server_keytab_file_bytes_for_computer()
         self._write_keytab_data(file_path, data)
         logger.info('Successfully wrote server key file with %s keys for computer %s to %s',
                     len(self.server_kerberos_keys), self.computer_name, file_path)
 
-    def write_user_keytab_file_for_computer(self, file_path):
+    def write_user_keytab_file_for_computer(self, file_path: str):
         logger.debug('Writing user key file for computer %s to %s', self.computer_name, file_path)
         data = self.get_user_keytab_file_bytes_for_computer()
         self._write_keytab_data(file_path, data)

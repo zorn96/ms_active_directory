@@ -155,7 +155,7 @@ def _get_principal_component_length_and_then_read_component(keytab: str, current
     return component, current_keytab_position
 
 
-def process_hex_string_keytab_file_to_extract_entries(keytab):
+def process_hex_string_keytab_file_to_extract_entries(keytab: str):
     """ Given a hex encoded keytab file, extract all of the entries in it and return a list of
     dictionaries describing each entry.
     """

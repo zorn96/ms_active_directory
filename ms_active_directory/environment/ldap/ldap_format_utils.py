@@ -5,8 +5,7 @@ import six
 from ldap3 import Connection
 from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
-from typing import List
-
+from typing import List, Union
 
 from ms_active_directory import logging_utils
 from ms_active_directory.core.ad_objects import ADObject
@@ -168,7 +167,7 @@ def escape_bytestring_for_filter(byte_str: bytes):
     return hex_escape_char + hex_escape_char.join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
 
 
-def normalize_entities_to_entity_dns(entities: List, lookup_by_name_fn: callable, controls: List):
+def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], lookup_by_name_fn: callable, controls: List):
     """ Given a list of entities that might be AD objects or strings, return a map of LDAP distinguished names
     for the entities.
     """
@@ -227,7 +226,7 @@ def normalize_object_location_in_domain(location: str, domain_dns_name: str):
     return strip_domain_from_object_location(location, domain_dns_name)
 
 
-def process_ldap3_conn_return_value(ldap_connection: Connection, return_value, paginated_response=False):
+def process_ldap3_conn_return_value(ldap_connection: Connection, return_value: Union[tuple, bool], paginated_response=False):
     """ Thread-safe ldap3 connections return a tuple containing a boolean about success,
     the result, the response, and the request. Non-thread-safe ldap3 connections just
     leave the other fields and return a boolean when performing search/add/etc. and
@@ -249,7 +248,7 @@ def process_ldap3_conn_return_value(ldap_connection: Connection, return_value, p
     return success, result, response, req
 
 
-def remove_ad_search_refs(response):
+def remove_ad_search_refs(response: List[dict]):
     """ Many LDAP queries in Active Directory will include a number of generic search references
     to say 'maybe go look here for completeness'. This is especially common in setups where
     there's trusted domains or other domains in the same forest.
