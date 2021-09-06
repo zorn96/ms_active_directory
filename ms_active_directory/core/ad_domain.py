@@ -13,6 +13,7 @@ from ldap3 import (
     Server,
     ServerPool,
     SIMPLE,
+    SUBTREE,
     Tls,
 )
 from ldap3.core.connection import SASL_AVAILABLE_MECHANISMS
@@ -36,6 +37,8 @@ from ms_active_directory.environment.kerberos.kerberos_constants import DEFAULT_
 from ms_active_directory.environment.ldap import trust_constants
 from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS,
+    AD_ATTRIBUTE_ENCRYPTION_TYPES,
+    AD_ATTRIBUTE_OBJECT_CLASS,
     AD_DOMAIN_FUNCTIONAL_LEVEL,
     AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
     AD_DOMAIN_TIME,
@@ -46,8 +49,13 @@ from ms_active_directory.environment.ldap.ldap_constants import (
     AD_TRUST_TYPE,
     AD_TRUST_POSIX_OFFSET,
     FIND_ANYTHING_FILTER,
+    TRUSTED_DOMAIN_OBJECT_CLASS,
 )
-from ms_active_directory.environment.ldap.ldap_format_utils import process_ldap3_conn_return_value
+from ms_active_directory.environment.ldap.ldap_format_utils import (
+    construct_ldap_base_dn_from_domain,
+    process_ldap3_conn_return_value,
+    remove_ad_search_refs,
+)
 from ms_active_directory.environment.security.security_config_constants import ADEncryptionType
 from ms_active_directory.exceptions import (
     DomainConnectException,
@@ -302,7 +310,7 @@ class ADDomain:
         :param ldap_connection: An ldap3 connection to the domain, optional.
         :param allowed_drift_seconds: The number of seconds considered "close", defaults to 5 minutes.
                                       5 minutes is the standard allowable drift for kerberos.
-        :return: A boolean indicating whether we're within allowed_drift_seconds seconds of the domain time.
+        :returns: A boolean indicating whether we're within allowed_drift_seconds seconds of the domain time.
         """
         if allowed_drift_seconds is None:
             allowed_drift_seconds = 300
@@ -319,7 +327,7 @@ class ADDomain:
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
         connection will be created and used.
         :param ldap_connection: An ldap3 connection to the domain, optional.
-        :return: A datetime object representing the time.
+        :returns: A datetime object representing the time.
         """
         if ldap_connection is None:
             logger.info('Creating a new anonymous connection to read domain time')
@@ -331,8 +339,9 @@ class ADDomain:
                                      # ldap attribute in any rfc
                                      search_scope=BASE, attributes=[AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS],
                                      size_limit=1)
-        success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
-        if not success:
+        success, result, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
             raise DomainSearchException('Failed to search the domain to query the current time.')
         base_attrs = response[0]['attributes']
         # time comes back as a 1-item list in the format ["20210809080919.0Z"]
@@ -346,7 +355,7 @@ class ADDomain:
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
         connection will be created and used.
         :param ldap_connection: An ldap3 connection to the domain, optional.
-        :return: An ADVersion enum indicating the functional level.
+        :returns: An ADVersion enum indicating the functional level.
         """
         if ldap_connection is None:
             logger.info('Creating a new anonymous connection to read the domain functional level')
@@ -356,8 +365,9 @@ class ADDomain:
         res = ldap_connection.search(search_base='', search_filter=FIND_ANYTHING_FILTER,
                                      search_scope=BASE, attributes=[AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS],
                                      size_limit=1)
-        success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
-        if not success:
+        success, result, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
             raise DomainSearchException('Failed search the domain for its functional level')
         base_attrs = response[0]['attributes']
         # this is a single-item list of a string of the level number, like ["7"]
@@ -369,8 +379,8 @@ class ADDomain:
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
         connection will be created and used.
         :param ldap_connection: An ldap3 connection to the domain, optional.
-        :return: A list of strings indicating the supported SASL mechanisms for the domain.
-                 ex: ['GSSAPI', 'GSS-SPNEGO', 'EXTERNAL']
+        :returns: A list of strings indicating the supported SASL mechanisms for the domain.
+                  ex: ['GSSAPI', 'GSS-SPNEGO', 'EXTERNAL']
         """
         if ldap_connection is None:
             logger.info('Creating a new anonymous connection to read domain supported SASL mechanisms')
@@ -380,11 +390,62 @@ class ADDomain:
         res = ldap_connection.search(search_base='', search_filter=FIND_ANYTHING_FILTER,
                                      search_scope=BASE, attributes=[AD_DOMAIN_SUPPORTED_SASL_MECHANISMS],
                                      size_limit=1)
-        success, _, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
-        if not success:
+        success, result, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
             raise DomainSearchException('Failed to search the domain for supported SASL mechanisms.')
         base_attrs = response[0]['attributes']
         return base_attrs.get(AD_DOMAIN_SUPPORTED_SASL_MECHANISMS, [])
+
+    def find_trusted_domains(self, ldap_connection: Connection=None):
+        """ Find the trusted domains for this domain.
+        An LDAP connection is technically optional, as some domains allow enumeration of trust
+        relationships by anonymous users, but a connection is likely needed. If one is not specified,
+        an anonymous LDAP connection will be created and used.
+
+        :param ldap_connection: An ldap3 connection to the domain, optional.
+        :returns: A list of ADTrustedDomain objects
+        """
+        if ldap_connection is None:
+            logger.info('Creating a new anonymous connection to enumerate trusted domains')
+            # we can try to read this information with an anonymous connection
+            ldap_connection = self.create_session_as_user().get_ldap_connection()
+
+        current_user = ldap_connection.extend.standard.who_am_i()
+        using_real_user = (not current_user)  # for help in good error messages
+
+        search_base = construct_ldap_base_dn_from_domain(self.domain)
+        search_filter = '({}={})'.format(AD_ATTRIBUTE_OBJECT_CLASS, TRUSTED_DOMAIN_OBJECT_CLASS)
+        attributes = [
+            AD_ATTRIBUTE_ENCRYPTION_TYPES,
+            AD_TRUSTED_DOMAIN_FQDN,
+            AD_TRUSTED_DOMAIN_NETBIOS_NAME,
+            AD_TRUST_ATTRIBUTES,
+            AD_TRUST_DIRECTION,
+            AD_TRUST_TYPE,
+            AD_TRUST_POSIX_OFFSET,
+        ]
+        # theoretically, with this subtree search, we could get a lot of results. so we should do a paginated
+        # search. but realistically, there shouldn't be THAT many trusted domains. default page size is 100,
+        # and having 100 trusted domains is ridiculous
+        res = ldap_connection.search(search_base=search_base, search_filter=search_filter,
+                                     search_scope=SUBTREE, attributes=attributes)
+        success, result, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
+            err_msg = ('Failed to search for trusted domains within the domain. This may have occurred if '
+                       'enumeration of trusted domains is not supported by anonymous users. If that is the '
+                       'case, you may wish to try again and specify a connection.')
+            if using_real_user:
+                err_msg = ('Failed to search for trusted domains within the domain. This may have occurred '
+                           'if reading trust information is restricted to more privileged users than the one '
+                           'used for the connection to the domain.')
+            raise DomainSearchException(err_msg)
+
+        entities = remove_ad_search_refs(response)
+        trusted_domains = [ADTrustedDomain(self, entry['attributes']) for entry in entities]
+        logger.info('Found %s trusted domain in %s', len(trusted_domains), self.domain)
+        return trusted_domains
 
     def refresh_ldap_server_discovery(self):
         """ Re-discover LDAP servers in DNS for the domain and redo the sorting by RTT.
@@ -580,12 +641,15 @@ class ADTrustedDomain:
         # parse our trust direction
         trust_dir = trust_ldap_attributes.get(AD_TRUST_DIRECTION, 0)
         self.disabled = trust_dir == trust_constants.TRUST_DIRECTION_DISABLED
-        self.primary_domain_is_trusted_by_self = trust_dir & trust_constants.TRUST_DIRECTION_INBOUND
-        self.self_is_trusted_by_primary_domain = trust_dir & trust_constants.TRUST_DIRECTION_OUTBOUND
+        self.primary_domain_is_trusted_by_self = bool(trust_dir & trust_constants.TRUST_DIRECTION_INBOUND)
+        self.self_is_trusted_by_primary_domain = bool(trust_dir & trust_constants.TRUST_DIRECTION_OUTBOUND)
 
         # other trust values
         self.trust_attributes_value = trust_ldap_attributes.get(AD_TRUST_ATTRIBUTES, 0)
         self.trust_posix_offset = trust_ldap_attributes.get(AD_TRUST_POSIX_OFFSET, 0)
+
+        # keep our raw ldap attributes in case there's more we don't explicitly extract
+        self.trust_ldap_attributes = trust_ldap_attributes
 
     def convert_to_ad_domain(self, site: str = None, ldap_servers_or_uris: List = None,
                              kerberos_uris: List[str] = None,
@@ -653,8 +717,8 @@ class ADTrustedDomain:
                           automatic assignment of IP using underlying system networking.
                           Can be set to an empty string to force use of the system defaults even
                           when the primary domain has source_ip set.
-        :return: An ADDomain object representing this trusted domain as a complete domain with the
-                 corresponding functionality.
+        :returns: An ADDomain object representing this trusted domain as a complete domain with the
+                  corresponding functionality.
         """
         if not self.is_active_directory_domain_trust():
             raise TrustedDomainConversionException('Cannot convert a non-AD trusted domain to an ADDomain object.')
@@ -684,6 +748,9 @@ class ADTrustedDomain:
 
     def get_netbios_name(self):
         return self.domain_netbios_name
+
+    def get_posix_offset(self):
+        return self.trust_posix_offset
 
     def get_raw_trust_attributes_value(self):
         return self.trust_attributes_value
@@ -716,16 +783,18 @@ class ADTrustedDomain:
     # trust attributes
 
     def is_transitive_trust(self):
-        return not (self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_NON_TRANSITIVE_BIT)
+        inherently_transitive = self.is_cross_forest_trust()
+        explicitly_non_transitive = bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_NON_TRANSITIVE_BIT)
+        return inherently_transitive and not explicitly_non_transitive
 
     def is_cross_forest_trust(self):
-        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_FOREST_TRANSITIVE_BIT
+        return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_FOREST_TRANSITIVE_BIT)
 
     def is_cross_organization_trust(self):
-        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_CROSS_ORGANIZATION_BIT
+        return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_CROSS_ORGANIZATION_BIT)
 
     def is_in_same_forest_as_primary_domain(self):
-        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_WITHIN_FOREST
+        return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_WITHIN_FOREST)
 
     def is_findable_via_netlogon(self):
         # things that are do not support pre-windows 2000 do not appear in netlogon.
@@ -733,10 +802,17 @@ class ADTrustedDomain:
         return not (self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_WIN_2000_PLUS_ONLY_BIT)
 
     def should_treat_as_external_trust(self):
-        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_TREAT_AS_EXTERNAL
+        return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_TREAT_AS_EXTERNAL)
 
     def mit_trust_uses_rc4_hmac_for(self):
-        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_USES_RC4_ENCRYPTION
+        return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_USES_RC4_ENCRYPTION)
 
     def uses_sid_filtering(self):
-        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_QUARANTINED_DOMAIN_BIT
+        return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_QUARANTINED_DOMAIN_BIT)
+
+    def __repr__(self):
+        return ('ADTrustedDomain(primary_domain={}, trust_ldap_attributes={})'
+                .format(self.primary_domain.__repr__(), self.trust_ldap_attributes))
+
+    def __str__(self):
+        return self.__repr__()

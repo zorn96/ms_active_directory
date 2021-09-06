@@ -260,7 +260,7 @@ def remove_ad_search_refs(response: List[dict]):
     So this is a helper function to remove such references.
 
     :param response: A list of LDAP search responses.
-    :return: A filtered list, with search references removed.
+    :returns: A filtered list, with search references removed.
     """
     if not response:
         return []
