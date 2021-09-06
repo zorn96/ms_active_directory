@@ -1,9 +1,5 @@
 import copy
-import json
 import pytz
-import socket
-
-from ms_active_directory import logging_utils
 
 from datetime import datetime, timedelta, timezone
 from ldap3 import (
@@ -12,7 +8,6 @@ from ldap3 import (
     Connection,
     FIRST,
     KERBEROS,
-    NTLM,
     SAFE_RESTARTABLE,
     SASL,
     Server,
@@ -32,16 +27,24 @@ from ssl import (
 from typing import List
 
 # local imports come after imports from other libraries
+from ms_active_directory import logging_utils
 from ms_active_directory.core.ad_session import ADSession
 from ms_active_directory.environment.constants import ADFunctionalLevel
 from ms_active_directory.environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
 from ms_active_directory.environment.format_utils import format_computer_name_for_authentication, get_system_default_computer_name
 from ms_active_directory.environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
+from ms_active_directory.environment.ldap import trust_constants
 from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS,
     AD_DOMAIN_FUNCTIONAL_LEVEL,
     AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
     AD_DOMAIN_TIME,
+    AD_TRUSTED_DOMAIN_FQDN,
+    AD_TRUSTED_DOMAIN_NETBIOS_NAME,
+    AD_TRUST_ATTRIBUTES,
+    AD_TRUST_DIRECTION,
+    AD_TRUST_TYPE,
+    AD_TRUST_POSIX_OFFSET,
     FIND_ANYTHING_FILTER,
 )
 from ms_active_directory.environment.ldap.ldap_format_utils import process_ldap3_conn_return_value
@@ -50,6 +53,7 @@ from ms_active_directory.exceptions import (
     DomainConnectException,
     DomainSearchException,
     InvalidDomainParameterException,
+    TrustedDomainConversionException,
 )
 
 
@@ -559,3 +563,180 @@ class ADDomain:
 
     def __str__(self):
         return self.__repr__()
+
+
+class ADTrustedDomain:
+
+    def __init__(self, primary_domain: ADDomain, trust_ldap_attributes: dict):
+        """ ADTrustedDomain objects represent a trustedDomain object found within an ADDomain.
+
+        :param primary_domain: An ADDomain object representing the domain where this trusted domain object was found.
+        :param trust_ldap_attributes: A dictionary of LDAP attributes for the trustedDomain.
+        """
+        self.primary_domain = primary_domain
+        self.domain_fqdn = trust_ldap_attributes.get(AD_TRUSTED_DOMAIN_FQDN)
+        self.domain_netbios_name = trust_ldap_attributes.get(AD_TRUSTED_DOMAIN_NETBIOS_NAME)
+        self.trust_type = trust_ldap_attributes.get(AD_TRUST_TYPE, 0)
+        # parse our trust direction
+        trust_dir = trust_ldap_attributes.get(AD_TRUST_DIRECTION, 0)
+        self.disabled = trust_dir == trust_constants.TRUST_DIRECTION_DISABLED
+        self.primary_domain_is_trusted_by_self = trust_dir & trust_constants.TRUST_DIRECTION_INBOUND
+        self.self_is_trusted_by_primary_domain = trust_dir & trust_constants.TRUST_DIRECTION_OUTBOUND
+
+        # other trust values
+        self.trust_attributes_value = trust_ldap_attributes.get(AD_TRUST_ATTRIBUTES, 0)
+        self.trust_posix_offset = trust_ldap_attributes.get(AD_TRUST_POSIX_OFFSET, 0)
+
+    def convert_to_ad_domain(self, site: str = None, ldap_servers_or_uris: List = None,
+                             kerberos_uris: List[str] = None,
+                             encrypt_connections: bool = True,
+                             ca_certificates_file_path: str = None,
+                             discover_ldap_servers: bool = True,
+                             discover_kerberos_servers: bool = True,
+                             dns_nameservers: List[str] = None,
+                             source_ip: str = None):
+        """Convert this AD domain trust to an ADDomain object. This takes all of the same keyword arguments
+        as creating an ADDomain object, and use the attributes of the primary domain where appropriate for
+        network settings.
+
+        :param site: The Active Directory site to operate within. This is only relevant if LDAP or
+                     kerberos servers are discovered in DNS, as there's site-specific records.
+                     If set, only hosts within the specified site will be used.
+        :param ldap_servers_or_uris: A list of either Server objects from the ldap3 library, or
+                                     string LDAP uris. If specified, they will be used to establish
+                                     sessions with the domain.
+        :param kerberos_uris: A list of string kerberos server uris. These can be IPs (and the default
+                              kerberos port of 88 will be used) or IP:port combinations.
+        :param encrypt_connections: Whether or not LDAP connections with the domain will be secured
+                                    using TLS. This must be True for join functionality to work,
+                                    as passwords can only be set over secure connections.
+                                    If not specified, defaults to True. If LDAP server objects are
+                                    provided with ssl enabled or ldaps:// uris are provided, then
+                                    connections to those servers will be encrypted because of the
+                                    inherent behavior of such configurations.
+        :param ca_certificates_file_path: A path to CA certificates to be used to establish trust
+                                          with LDAP servers when securing connections. If not
+                                          specified, then TLS will not check the peer certificate.
+                                          If LDAP server objects are specified, then their TLS
+                                          settings will be used rather than anything set in this
+                                          variable. It is only used when discovering servers or
+                                          using string URIs, so Server objects can be used if
+                                          different CAs sign different servers' certificates
+                                          due to regional CAs or something similar.
+                                          If not specified, defaults to None.
+        :param discover_ldap_servers: If true, and LDAP servers/uris are not specified, then LDAP
+                                      servers for the domain will be discovered in DNS.
+                                      If not specified, defaults to True.
+        :param discover_kerberos_servers: If true, and kerberos uris are not specified, then kerberos
+                                          servers for the domain will be discovered in DNS.
+                                          If not specified, defaults to True.
+        :param dns_nameservers: A list of strings indicating the IP addresses of DNS servers to use
+                                when discovering servers for the domain. These may be IPv4 or IPv6
+                                addresses.
+                                If not specified, defaults to the DNS nameservers configured in the
+                                primary domain where this trusted domain was found because domains
+                                that trust each other are mutually discoverable in each others'
+                                DNS or must use a DNS that contains both of them.
+                                If not specified and the primary domain has no nameservers set,
+                                defaults to what's configured in /etc/resolv.conf on POSIX systems,
+                                and extracting nameservers from registry keys on windows.
+                                Can be set to an empty list to force use of the system defaults even
+                                when the primary domain has dns_nameservers set.
+        :param source_ip: A source IP address to use for both DNS and LDAP connections established for
+                          this domain.
+                          If not specified, defaults to the source IP used for the primary where
+                          this trusted domain was found, because domains that trust each other are
+                          mutually routable, and so the source IP used to talk to the primary domain
+                          is assumed to also be the right default network identity for talking to
+                          this domain.
+                          If not specified and the primary domain has no source ip set, defaults to
+                          automatic assignment of IP using underlying system networking.
+                          Can be set to an empty string to force use of the system defaults even
+                          when the primary domain has source_ip set.
+        :return: An ADDomain object representing this trusted domain as a complete domain with the
+                 corresponding functionality.
+        """
+        if not self.is_active_directory_domain_trust():
+            raise TrustedDomainConversionException('Cannot convert a non-AD trusted domain to an ADDomain object.')
+
+        logger.info('Creating ADDomain object for %s which is a trusted domain found in %s',
+                    self.domain_fqdn, self.primary_domain.domain)
+        if dns_nameservers is None and self.primary_domain.dns_nameservers:
+            logger.info('Using DNS nameservers from primary domain %s for new ADDomain, because domains with a '
+                        'trust relationship must be mutually routable', self.primary_domain.domain)
+            dns_nameservers = self.primary_domain.dns_nameservers
+
+        if source_ip is None and self.primary_domain.source_ip:
+            logger.info('Using source IP address from primary domain %s for new ADDomain, because domains with a '
+                        'trust relationship must be mutually routable, meaning we should communicate over the same '
+                        'network when connecting to the new ADDomain', self.primary_domain.domain)
+            source_ip = self.primary_domain.source_ip
+
+        return ADDomain(self.domain_fqdn, site=site, ldap_servers_or_uris=ldap_servers_or_uris,
+                        kerberos_uris=kerberos_uris, encrypt_connections=encrypt_connections,
+                        ca_certificates_file_path=ca_certificates_file_path,
+                        discover_ldap_servers=discover_ldap_servers,
+                        discover_kerberos_servers=discover_kerberos_servers,
+                        dns_nameservers=dns_nameservers, source_ip=source_ip)
+
+    def get_fqdn(self):
+        return self.domain_fqdn
+
+    def get_netbios_name(self):
+        return self.domain_netbios_name
+
+    def get_raw_trust_attributes_value(self):
+        return self.trust_attributes_value
+
+    # trust types
+
+    def is_non_active_directory_windows_trust(self):
+        return self.trust_type == trust_constants.TRUST_TYPE_NON_AD_WINDOWS
+
+    def is_active_directory_domain_trust(self):
+        return self.trust_type == trust_constants.TRUST_TYPE_WINDOWS_AD
+
+    def is_mit_trust(self):
+        return self.trust_type == trust_constants.TRUST_TYPE_MIT
+
+    # trust directions
+
+    def is_disabled(self):
+        return self.disabled
+
+    def is_bidirectional_trust(self):
+        return self.primary_domain_is_trusted_by_self and self.self_is_trusted_by_primary_domain
+
+    def trusts_primary_domain(self):
+        return self.primary_domain_is_trusted_by_self
+
+    def is_trusted_by_primary_domain(self):
+        return self.self_is_trusted_by_primary_domain
+
+    # trust attributes
+
+    def is_transitive_trust(self):
+        return not (self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_NON_TRANSITIVE_BIT)
+
+    def is_cross_forest_trust(self):
+        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_FOREST_TRANSITIVE_BIT
+
+    def is_cross_organization_trust(self):
+        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_CROSS_ORGANIZATION_BIT
+
+    def is_in_same_forest_as_primary_domain(self):
+        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_WITHIN_FOREST
+
+    def is_findable_via_netlogon(self):
+        # things that are do not support pre-windows 2000 do not appear in netlogon.
+        # and as far as I can tell, that's the only meaningful information in this bit
+        return not (self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_WIN_2000_PLUS_ONLY_BIT)
+
+    def should_treat_as_external_trust(self):
+        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_TREAT_AS_EXTERNAL
+
+    def mit_trust_uses_rc4_hmac_for(self):
+        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_USES_RC4_ENCRYPTION
+
+    def uses_sid_filtering(self):
+        return self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_QUARANTINED_DOMAIN_BIT

@@ -1,5 +1,5 @@
 CERTIFICATE_AUTHORITY_OBJECT_CLASS = 'certificationAuthority'
-TRUSTED_DOMAIN_OBJECT_CLASS = 'TrustedDomain'
+TRUSTED_DOMAIN_OBJECT_CLASS = 'trustedDomain'
 COMPUTER_OBJECT_CLASS = 'computer'
 GROUP_OBJECT_CLASS = 'group'
 POSIX_GROUP_OBJECT_CLASS = 'posixGroup'
@@ -59,12 +59,13 @@ AD_DOMAIN_FUNCTIONAL_LEVEL = 'domainFunctionality'
 AD_DOMAIN_SUPPORTED_SASL_MECHANISMS = 'supportedSASLMechanisms'
 AD_DOMAIN_TIME = 'currentTime'
 AD_SCHEMA_VERSION = 'objectVersion'
-AD_TRUSTED_DOMAIN_NAME = 'trustPartner'  # the netbios name of the trusted domain
+AD_TRUSTED_DOMAIN_FQDN = 'trustPartner'  # the FQDN of the trusted domain
+AD_TRUSTED_DOMAIN_NETBIOS_NAME = 'trustPartner'  # the FQDN of the trusted domain
 AD_TRUST_TYPE = 'trustType'  # indicates windows or MIT
 AD_TRUST_DIRECTION = 'trustDirection'  # disabled, incoming, outgoing, bidirectional
-# TODO: implement decoding of more detailed trust info
 # https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/e9a2d23c-c31e-4a6f-88a0-6646fdb51a3c
 AD_TRUST_ATTRIBUTES = 'trustAttributes'
+AD_TRUST_POSIX_OFFSET = 'trustPosixOffset'
 
 
 # From windows AD docs
