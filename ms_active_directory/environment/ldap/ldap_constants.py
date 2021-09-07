@@ -27,6 +27,7 @@ AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
 AD_ATTRIBUTE_COMMON_NAME = 'cn'
 AD_ATTRIBUTE_OBJECT_CLASS = 'objectClass'
 AD_ATTRIBUTE_OBJECT_SID = 'objectSID'
+AD_ATTRIBUTE_NETBIOS_NAME = 'nETBIOSName'
 
 # keys for general user, group, and computer attributes
 AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'
@@ -60,7 +61,7 @@ AD_DOMAIN_SUPPORTED_SASL_MECHANISMS = 'supportedSASLMechanisms'
 AD_DOMAIN_TIME = 'currentTime'
 AD_SCHEMA_VERSION = 'objectVersion'
 AD_TRUSTED_DOMAIN_FQDN = 'trustPartner'  # the FQDN of the trusted domain
-AD_TRUSTED_DOMAIN_NETBIOS_NAME = 'trustPartner'  # the FQDN of the trusted domain
+AD_TRUSTED_DOMAIN_NETBIOS_NAME = 'flatName'  # the netbios name of the trusted domain
 AD_TRUST_TYPE = 'trustType'  # indicates windows or MIT
 AD_TRUST_DIRECTION = 'trustDirection'  # disabled, incoming, outgoing, bidirectional
 # https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/e9a2d23c-c31e-4a6f-88a0-6646fdb51a3c
@@ -83,15 +84,20 @@ LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT = 16
 DEFAULT_COMPUTER_SERVICES = ['HOST']
 DEFAULT_COMPUTER_LOCATION = 'CN=Computers'
 DNS_SERVICE_FILTER = 'DNS/*'
-DOMAIN_CONTROLLER_SCHEMA_VERSION_SEARCH_CONTAINER = 'CN=schema,CN=Configuration'
 DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
+DOMAIN_CONTROLLER_SCHEMA_VERSION_SEARCH_CONTAINER = 'CN=schema,' + DOMAIN_WIDE_CONFIGURATIONS_CONTAINER
+DOMAIN_WIDE_PARTITIONS_CONTAINER = 'CN=Partitions,' + DOMAIN_WIDE_CONFIGURATIONS_CONTAINER
 
 # when checking if something simply exists, or getting everything at a level/subtree,
 # we use this filter
 FIND_ANYTHING_FILTER = '(objectClass=*)'
+# other common filters
 FIND_COMPUTER_FILTER = '(objectClass=Computer)'
 FIND_GROUP_FILTER = '(objectClass=Group)'
 FIND_USER_FILTER = '(objectClass=User)'
+# if you want to filter to get records that have an attribute populated, you can check for a value
+# of star
+VALUE_TO_FIND_ANY_WITH_ATTRIBUTE_POPULATED = '*'
 
 # miscellaneous values we need
 UNKNOWN_USER_POSIX_UID = -1

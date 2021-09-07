@@ -38,6 +38,7 @@ from ms_active_directory.environment.ldap import trust_constants
 from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS,
     AD_ATTRIBUTE_ENCRYPTION_TYPES,
+    AD_ATTRIBUTE_NETBIOS_NAME,
     AD_ATTRIBUTE_OBJECT_CLASS,
     AD_DOMAIN_FUNCTIONAL_LEVEL,
     AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
@@ -48,8 +49,10 @@ from ms_active_directory.environment.ldap.ldap_constants import (
     AD_TRUST_DIRECTION,
     AD_TRUST_TYPE,
     AD_TRUST_POSIX_OFFSET,
+    DOMAIN_WIDE_PARTITIONS_CONTAINER,
     FIND_ANYTHING_FILTER,
     TRUSTED_DOMAIN_OBJECT_CLASS,
+    VALUE_TO_FIND_ANY_WITH_ATTRIBUTE_POPULATED,
 )
 from ms_active_directory.environment.ldap.ldap_format_utils import (
     construct_ldap_base_dn_from_domain,
@@ -177,7 +180,8 @@ class ADDomain:
                  discover_ldap_servers: bool = True,
                  discover_kerberos_servers: bool = True,
                  dns_nameservers: List[str] = None,
-                 source_ip: str = None):
+                 source_ip: str = None,
+                 netbios_name: str = None):
         """ Initialize an interface for defining an AD domain and interacting with it.
         :param domain: The DNS name of the Active Directory domain that this object represents.
         :param site: The Active Directory site to operate within. This is only relevant if LDAP or
@@ -221,6 +225,11 @@ class ADDomain:
                           this domain. If not specified, defaults to automatic assignment of IP using
                           underlying system networking.
                           Defaults to None.
+        :param netbios_name: The netbios name of this domain, which is relevant for a variety of functions.
+                             If this is set, then we won't search the domain for the information.
+                             This can be set by users, but isn't needed. It's primarily here to avoid
+                             extra lookups when creating ADDomain objects from ADTrustedDomain objects, as
+                             the netbios name is already known.
         """
         self.domain = domain.lower()  # cast to lowercase
         self.site = site.lower() if site else None
@@ -231,6 +240,7 @@ class ADDomain:
         self.kerberos_uris = []
         self.dns_nameservers = dns_nameservers
         self.source_ip = source_ip
+        self.netbios_name = netbios_name
         # discover ldap servers and kerberos servers if we weren't provided any and weren't told not to
         if not ldap_servers_or_uris and discover_ldap_servers:
             ldap_servers_or_uris = discover_ldap_domain_controllers_in_domain(self.domain, site=self.site,
@@ -373,6 +383,46 @@ class ADDomain:
         # this is a single-item list of a string of the level number, like ["7"]
         level_str = base_attrs.get(AD_DOMAIN_FUNCTIONAL_LEVEL)[0]
         return ADFunctionalLevel.get_functional_level_from_value(int(level_str))
+
+    def find_netbios_name(self, ldap_connection: Connection=None, force_refresh: bool=False):
+        """ Find the netbios name for this domain. Renaming a domain is a huge task and is incredibly rare,
+        so this information is cached when first read, and it only re-read if specifically requested.
+        Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
+        connection will be created and used.
+
+        :param ldap_connection: An ldap3 connection to the domain, optional.
+        :param force_refresh: If set to true, the domain will be searched for the information even if
+                              it is already cached. Defaults to false.
+        :returns: A string indicating the netbios name of the domain.
+        """
+        if self.netbios_name is not None and not force_refresh:
+            return self.netbios_name
+
+        if ldap_connection is None:
+            logger.info('Creating a new anonymous connection to read netbios name')
+            # we just need an anonymous session to read this information
+            ldap_connection = self.create_session_as_user().get_ldap_connection()
+        search_base = DOMAIN_WIDE_PARTITIONS_CONTAINER + ',' + construct_ldap_base_dn_from_domain(self.domain)
+        search_filter = '({}={})'.format(AD_ATTRIBUTE_NETBIOS_NAME, VALUE_TO_FIND_ANY_WITH_ATTRIBUTE_POPULATED)
+
+        res = ldap_connection.search(search_base=search_base, search_filter=search_filter,
+                                     search_scope=SUBTREE, attributes=[AD_ATTRIBUTE_NETBIOS_NAME],
+                                     size_limit=1)
+        success, result, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
+            raise DomainSearchException('Failed search the domain for its netbios name. This may be due to the '
+                                        'domain being unreachable or due to a permission issue. Raw result: {}'
+                                        .format(result))
+
+        entities = remove_ad_search_refs(response)
+        if len(entities) == 0:
+            raise DomainSearchException('No results were found with a netbios name in the domain. This may be a '
+                                        'results of a domain misconfiguration issue.')
+        nb_name = entities[0]['attributes'][AD_ATTRIBUTE_NETBIOS_NAME]
+        logger.info('Found netbios name %s for domain %s', nb_name, self.domain)
+        self.netbios_name = nb_name
+        return self.netbios_name
 
     def find_supported_sasl_mechanisms(self, ldap_connection: Connection=None):
         """ Find the supported SASL mechanisms for this domain.
@@ -618,6 +668,8 @@ class ADDomain:
             result += ', dns_nameservers=[{}]'.format(list_repr)
         if self.source_ip:
             result += ', source_ip=' + self.source_ip
+        if self.netbios_name:
+            result += ', netbios_name=' + self.netbios_name
         result += ')'
 
         return result
@@ -636,7 +688,7 @@ class ADTrustedDomain:
         """
         self.primary_domain = primary_domain
         self.domain_fqdn = trust_ldap_attributes.get(AD_TRUSTED_DOMAIN_FQDN)
-        self.domain_netbios_name = trust_ldap_attributes.get(AD_TRUSTED_DOMAIN_NETBIOS_NAME)
+        self.netbios_name = trust_ldap_attributes.get(AD_TRUSTED_DOMAIN_NETBIOS_NAME)
         self.trust_type = trust_ldap_attributes.get(AD_TRUST_TYPE, 0)
         # parse our trust direction
         trust_dir = trust_ldap_attributes.get(AD_TRUST_DIRECTION, 0)
@@ -741,13 +793,14 @@ class ADTrustedDomain:
                         ca_certificates_file_path=ca_certificates_file_path,
                         discover_ldap_servers=discover_ldap_servers,
                         discover_kerberos_servers=discover_kerberos_servers,
-                        dns_nameservers=dns_nameservers, source_ip=source_ip)
+                        dns_nameservers=dns_nameservers, source_ip=source_ip,
+                        netbios_name=self.netbios_name)
 
     def get_fqdn(self):
         return self.domain_fqdn
 
     def get_netbios_name(self):
-        return self.domain_netbios_name
+        return self.netbios_name
 
     def get_posix_offset(self):
         return self.trust_posix_offset

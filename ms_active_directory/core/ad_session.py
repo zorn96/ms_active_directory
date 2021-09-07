@@ -648,12 +648,16 @@ class ADSession:
             # return a copy of our cache
             if (self._last_trusted_domain_query_time <= now and
                     now - self._last_trusted_domain_query_time >= self.trusted_domain_cache_lifetime_seconds):
-                return copy.deepcopy(self._trusted_domain_list_cache)
+                # return a shallow copy so that if someone (for example) filters out MIT-type trusts,
+                # it won't affect our cache
+                return copy.copy(self._trusted_domain_list_cache)
         else:
             now = time.time()
 
         trusted_domains = self.domain.find_trusted_domains(self.ldap_connection)
-        self._trusted_domain_list_cache = copy.deepcopy(trusted_domains)
+        # keep a shallow copy so that if someone (for example) filters out MIT-type trusts,
+        # it won't affect our cache
+        self._trusted_domain_list_cache = copy.copy(trusted_domains)
         self._last_trusted_domain_query_time = now
         return trusted_domains
 
@@ -2522,14 +2526,32 @@ class ADSession:
         return self.overwrite_attributes_for_object(computer, attribute_to_value_map, controls,
                                                     raise_exception_on_failure)
 
+    # generic utilities for figuring out information about the current user with respect to the domain
+
+    def is_session_user_from_domain(self):
+        """ Return a boolean indicating whether or not the session's user is a member of the domain that we're
+        communicating with, or is trusted from another domain.
+        :returns: True if the user is from the domain we're communicating with, False otherwise.
+        """
+        authz_id = self.who_am_i()
+        if not authz_id:  # anonymous users don't belong to the domain
+            return False
+        netbios_name = self.domain.find_netbios_name(self.ldap_connection)
+        # cast things to uppercase to be safe on the check since domain names aren't case sensitive
+        domain_member_netbios_start = 'U:' + netbios_name.upper() + '\\'
+        return authz_id.upper().startswith(domain_member_netbios_start)
+
     def who_am_i(self):
-        """ Return the authorization identity as recognized by the server.
+        """ Return the authorization identity of the session's user as recognized by the server.
         This can be helpful when a script is provided with an identity in one form that is used to start a session
         (e.g. a distinguished name, or a pre-populated kerberos cache) and then it wants to determine its identity
         that the server actually sees.
         This just calls the LDAP connection function, as it's suitable for AD as well.
+        :returns: A string indicating the authorization identity of the session's user as recognized by the server.
         """
         return self.ldap_connection.extend.standard.who_am_i()
+
+    # internal validation utils
 
     def _validate_group_and_get_group_obj(self, group: Union[str, ADGroup]):
         if isinstance(group, str):
@@ -2592,7 +2614,8 @@ class ADSession:
     def __repr__(self):
         conn_repr = self.ldap_connection.__repr__()
         domain_repr = self.domain.__repr__()
-        return 'ADSession(ldap_connection={}, domain={})'.format(conn_repr, domain_repr)
+        return ('ADSession(ldap_connection={}, domain={}, search_paging_size={}, trusted_domain_cache_lifetime_seconds={})'
+                .format(conn_repr, domain_repr, self.search_paging_size, self.trusted_domain_cache_lifetime_seconds))
 
     def __str__(self):
         return self.__repr__()
