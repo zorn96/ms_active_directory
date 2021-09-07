@@ -18,14 +18,16 @@ and all LDAP basic, NTLM, and SASL authentication mechanisms (e.g. Kerberos) sup
 1. Joining a computer to a domain, either by creating a new computer account or taking over an existing
    account.
 2. Discovering domain resources and properties, optimizing domain communication for the network
-3. Finding users, computers, and groups based on a variety of properties (e.g. name, SID, user-specified properties)
-4. Querying information about users, computers, groups, and generic objects
-5. Looking up user, computer, and group memberships
-6. Adding and removing users, computers, and groups to and from other groups
-7. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
-8. Looking up information about the permissions set on a user, computer, group, or generic object
-9. Adding permissions to the security descriptor for a user, computer, group, or generic object
-10. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
+3. Discovering trusted domains, including MIT Kerberos domains and trusted Active Directory domains, and their
+   attributes (e.g. are the trusts transitive? is SID filtering used? what direction is the trust?)
+4. Finding users, computers, and groups based on a variety of properties (e.g. name, SID, user-specified properties)
+5. Querying information about users, computers, groups, and generic objects
+6. Looking up user, computer, and group memberships
+7. Adding and removing users, computers, and groups to and from other groups
+8. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
+9. Looking up information about the permissions set on a user, computer, group, or generic object
+10. Adding permissions to the security descriptor for a user, computer, group, or generic object
+11. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
     or overwriting values.
 
 
@@ -737,3 +739,58 @@ success = session.overwrite_attributes_for_user(user_name, new_value_map)
 ```
 You can also perform these actions on groups and objects using the similarly named
 functions, just like with appending.
+
+# Discovering and Managing Trusted Domains
+
+You can discover trusted domains using a session, and check properties about them.
+```
+from ms_active_directory import ADDomain
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+trusted_domains = session.find_trusted_domains_for_domain()
+
+# split domains up based on trust type
+trusted_mit_domains = [dom for dom in trusted_domains if dom.is_mit_trust()]
+trusted_ad_domains = [dom for dom in trusted_domains if dom.is_active_directory_domain_trust()]
+
+# print a few attributes that may be relevant
+for ad_dom in trusted_ad_domains:
+    print('FQDN: {}'.format(ad_dom.get_netbios_name()))
+    print('Netbios name: {}'.format(ad_dom.get_netbios_name()))
+    print('Disabled: {}'.format(ad_dom.is_disabled())
+    print('Bi-directional: {}'.format(ad_dom.is_bidirectional_trust())
+    print('Transitive: {}'.format(ad_dom.is_transitive_trust())
+```
+
+You can also convert AD domains that are trusted into fully usable `ADDomain`
+objects for the purpose of creating sessions and looking up information there.
+``` 
+from ms_active_directory import ADDomain
+from ldap3 import NTLM
+domain = ADDomain('example.com')
+widely_trusted_user = 'example.com\\org-admin'
+password = 'password'
+
+primary_session = domain.create_session_as_user(widely_trusted_user, password,
+                                                authentication_mechanism=NTLM)
+
+# get our trusted AD domains
+trusted_domains = session.find_trusted_domains_for_domain()
+trusted_ad_domains = [dom for dom in trusted_domains if dom.is_active_directory_domain_trust()]
+
+# convert them into domains where our user should be trusted
+domains_our_user_can_auth_with = []
+for trusted_dom in trusted_ad_domains:
+    if trusted_dom.trusts_primary_domain() and not trusted_dom.is_disabled():
+        full_domain = trusted_dom.convert_to_ad_domain()
+        domains_our_user_can_auth_with.append(full_domain)
+
+# create sessions so we can search across many domains
+all_user_sessions = [primary_session]
+for dom in domains_our_user_can_auth_with:
+    # SASL is needed for cross-domain authentication in general
+    session = dom.create_session_as_user(widely_trusted_user, password,
+                                         authentication_mechanism=NTLM)
+    all_user_sessions.append(session)                                     
+```
