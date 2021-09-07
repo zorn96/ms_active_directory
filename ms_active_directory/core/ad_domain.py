@@ -264,13 +264,24 @@ class ADDomain:
         return self.domain
 
     def get_ldap_servers(self):
-        return copy.deepcopy(self.ldap_servers)
+        return [self._copy_ldap_server(serv) for serv in self.ldap_servers]
 
     def get_ldap_uris(self):
         return copy.deepcopy(self.ldap_uris)
 
     def get_kerberos_uris(self):
         return copy.deepcopy(self.kerberos_uris)
+
+    def _copy_ldap_server(self, serv: Server):
+        """ Copies an LDAP Server object. The normal python copy doesn't work on Server objects because
+        they have locks in them. But sharing server objects across threads/connections/sessions/etc.
+        can cause a lot of issues where shared state gets messed up by failed queries or changes in
+        one place. So we "copy" the important attributes.
+        """
+        return Server(serv.host, port=serv.port, use_ssl=serv.ssl,
+                      allowed_referral_hosts=serv.allowed_referral_hosts,
+                      get_info=serv.get_info, tls=serv.tls, formatter=serv.custom_formatter,
+                      connect_timeout=serv.connect_timeout, mode=serv.mode, validator=serv.custom_validator)
 
     def set_ldap_servers_or_uris(self, ldap_servers_or_uris: List):
         """ Set our list of LDAP servers or LDAP URIs. The list provided can be a list of
@@ -295,8 +306,9 @@ class ADDomain:
                 ldap_server_objs.append(Server(serv, tls=tls_setting))
                 ldap_uris.append(serv)
             elif isinstance(serv, Server):
-                # extract the uri for list of the server uris we're using
-                ldap_server_objs.append(serv)
+                # extract the uri for list of the server uris we're using, and copy the server object
+                copied_server = self._copy_ldap_server(serv)
+                ldap_server_objs.append(copied_server)
                 ldap_uris.append(serv.name)
             else:
                 raise InvalidDomainParameterException('Invalid type for element of ldap server list, {}; '
@@ -528,7 +540,8 @@ class ADDomain:
         # our servers were either user specified (in which case it's a list of ordered preferences) or
         # were discovered automatically (in which case they're ordered by RTT), so use the FIRST strategy
         # to either contact the first preferred server or the fastest/closest server
-        server_pool = ServerPool(servers=self.ldap_servers, pool_strategy=FIRST)
+        copied_servers = [self._copy_ldap_server(serv) for serv in self.ldap_servers]
+        server_pool = ServerPool(servers=copied_servers, pool_strategy=FIRST)
         # if the authentication mechanism is a SASL mechanism, set the authentication mechanism to SASL
         # and move the current authentication mechanism to be the sasl_mechanism in the kwargs
 
