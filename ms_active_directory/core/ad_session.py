@@ -1,7 +1,7 @@
-import collections.abc
 import copy
 import socket
 import ssl
+import time
 
 from ms_active_directory import logging_utils
 
@@ -13,7 +13,9 @@ from ldap3 import (
     SUBTREE,
 )
 from ldap3.protocol.rfc4511 import Control
-from typing import List, Union
+from typing import List, Union, TYPE_CHECKING
+if TYPE_CHECKING:
+    from ms_active_directory.core.ad_domain import ADDomain
 
 import ms_active_directory.environment.constants as constants
 import ms_active_directory.environment.ldap.ldap_format_utils as ldap_utils
@@ -43,7 +45,29 @@ logger = logging_utils.get_logger()
 
 class ADSession:
 
-    def __init__(self, ldap_connection: Connection, domain, search_paging_size=100):
+    def __init__(self, ldap_connection: Connection, domain: 'ADDomain', search_paging_size: int=100,
+                 trusted_domain_cache_lifetime_seconds: int=24*60*60):
+        """ Create a session object for a connection to an AD domain.
+        Given an LDAP connection, a domain, and optional parameters relating to searches and multi-domain
+        functionality, create an ADSession object.
+
+        :param ldap_connection: An ldap3 Connection object representing the connection to LDAP servers within
+                                the domain.
+        :param domain: An ADDomain object representing the domain that we're communicating with.
+        :param search_paging_size: Optional. The page size for paginated searches. If a search is expected to
+                                   be able to have more than this many results, a paginated search will be
+                                   performed. This is used as the page size in such searches. Changing this
+                                   affects the balance between the number of queries made and the size of
+                                   each query response in a large scale environment, and so it can be used
+                                   to optimize behavior based on network topology and traffic.
+                                   If not specified, defaults to 100.
+        :param trusted_domain_cache_lifetime_seconds: Optional. How long to maintain our trusted domain cache in
+                                                      seconds. The cache of trusted domain information exists because
+                                                      trust relationships change infrequently, but will be used a lot
+                                                      in searches and such when automatic traversal of trusts is
+                                                      supported. Can be set to 0 to disable the cache.
+                                                      If not specified, defaults to 24 hours.
+        """
         self.ldap_connection = ldap_connection
         self.domain = domain
         self.domain_dns_name = self.domain.get_domain_dns_name()
@@ -55,6 +79,11 @@ class ADSession:
         self._domain_validation_search_base = self.domain_search_base
         # this is the size threshold at which we'll switch to paged searches. it's also the page size we'll use
         self.search_paging_size = search_paging_size
+        # this is how often we'll re-read trusted domain information, since it doesn't change often and might be
+        # used across A LOT of queries, so we want to cut back on the query load for trusted domain info.
+        self.trusted_domain_cache_lifetime_seconds = trusted_domain_cache_lifetime_seconds
+        self._trusted_domain_list_cache = []
+        self._last_trusted_domain_query_time = None
 
     def is_authenticated(self):
         """ Returns if the session is currently authenticated """
@@ -116,6 +145,12 @@ class ADSession:
     def set_search_paging_size(self, new_size: int):
         self.search_paging_size = new_size
 
+    def get_trusted_domain_cache_lifetime_seconds(self):
+        return self.trusted_domain_cache_lifetime_seconds
+
+    def set_trusted_domain_cache_lifetime_seconds(self, new_lifetime_in_seconds: int):
+        self.trusted_domain_cache_lifetime_seconds = new_lifetime_in_seconds
+
     def dn_exists_in_domain(self, distinguished_name: str):
         """ Check if a distinguished name exists within the domain, regardless of what it is.
         :param distinguished_name: Either a relative distinguished name or full distinguished name
@@ -132,7 +167,12 @@ class ADSession:
                                           search_filter=ldap_constants.FIND_ANYTHING_FILTER,
                                           search_scope=BASE,
                                           size_limit=1)
-        exists, _, _, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        exists, result, _, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
+            raise DomainSearchException('An error was encountered searching the domain to determine if {} exists. '
+                                        'This may have occurred due to domain unavailability or a permission '
+                                        'issue. Raw result: {}'.format(distinguished_name, result))
         return exists
 
     def object_exists_in_domain_with_attribute(self, attr: str, unescaped_value: str):
@@ -154,7 +194,13 @@ class ADSession:
                                           search_scope=SUBTREE,
                                           attributes=[attr],
                                           size_limit=1)
-        _, _, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        _, result, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
+            raise DomainSearchException('An error was encountered searching the domain to determine if an object '
+                                        'exists with value {} for attribute {}. This may have occurred due to domain '
+                                        'unavailability or a permission issue. Raw result: {}'
+                                        .format(attr, unescaped_value, result))
         real_entities = ldap_utils.remove_ad_search_refs(response)
         return len(real_entities) > 0
 
@@ -440,6 +486,9 @@ class ADSession:
     def is_domain_close_in_time_to_localhost(self, allowed_drift_seconds=None):
         """ Get whether the domain time is close to the current local time.
         Just calls the parent domain function and returns that. This is included here for completeness.
+        :param allowed_drift_seconds: The number of seconds considered "close", defaults to 5 minutes.
+                                      5 minutes is the standard allowable drift for kerberos.
+        :returns: A boolean indicating whether we're within allowed_drift_seconds seconds of the domain time.
         """
         return self.domain.is_close_in_time_to_localhost(self.ldap_connection, allowed_drift_seconds)
 
@@ -468,8 +517,9 @@ class ADSession:
         res = self.ldap_connection.search(search_base=search_loc, search_filter=ca_filter, search_scope=SUBTREE,
                                           attributes=[ldap_constants.AD_ATTRIBUTE_CA_CERT],
                                           controls=controls)
-        success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
-        if not success:
+        success, result, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
             raise DomainSearchException('Failed to search domain for Certificate Authorities')
         entities = ldap_utils.remove_ad_search_refs(entities)
         logger.info('Found %s CAs within the domain', len(entities))
@@ -517,8 +567,9 @@ class ADSession:
         res = self.ldap_connection.search(search_base=self.domain_search_base, search_filter=dns_computer_filter,
                                           search_scope=SUBTREE, attributes=[ldap_constants.AD_ATTRIBUTE_DNS_HOST_NAME],
                                           controls=controls)
-        success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
-        if not success:
+        success, result, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
             raise DomainSearchException('Failed to search domain for Computers hosting DNS services')
         entities = ldap_utils.remove_ad_search_refs(entities)
         logger.info('Found %s computers that host DNS services within the domain', len(entities))
@@ -540,15 +591,16 @@ class ADSession:
 
     def find_forest_schema_version(self):
         """ Attempt to determine the version of Windows Server set in the forest's schema.
-        returns: An Enum of type ADVersion indicating the schema version.
+        :returns: An Enum of type ADVersion indicating the schema version.
         """
         search_loc = '{},{}'.format(ldap_constants.DOMAIN_CONTROLLER_SCHEMA_VERSION_SEARCH_CONTAINER,
                                     self.domain_search_base)
         res = self.ldap_connection.search(search_base=search_loc, search_filter=ldap_constants.FIND_ANYTHING_FILTER,
                                           search_scope=BASE, attributes=[ldap_constants.AD_ATTRIBUTE_GET_ALL_NON_VIRTUAL_ATTRS],
                                           size_limit=1)
-        success, _, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
-        if not success:
+        success, result, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        search_err = result['result'] != 0
+        if search_err:
             raise DomainSearchException('Failed to search domain for schema.')
         entities = ldap_utils.remove_ad_search_refs(entities)
         if len(entities) == 0:
@@ -573,8 +625,41 @@ class ADSession:
         to be authenticated as anything other than anonymous to read this information (since it's
         often used to figure out how to authenticate).
         This is included in the session object for completeness.
+        :returns: A list of strings indicating the supported SASL mechanisms for the domain.
+                  ex: ['GSSAPI', 'GSS-SPNEGO', 'EXTERNAL']
         """
         return self.domain.find_supported_sasl_mechanisms(self.ldap_connection)
+
+    def find_trusted_domains_for_domain(self, force_cache_refresh=False):
+        """ Find the trusted domains for this domain.
+        If we have cached trusted domains for this session's domain, and the cache is still valid based on our
+        cache lifetime, return that.
+
+        :param force_cache_refresh: If true, don't use our cached trusted domains even if the cache is valid.
+                                    Defaults to false.
+        :returns: A list of ADTrustedDomain objects
+        """
+        if (not force_cache_refresh) and self._last_trusted_domain_query_time is not None:
+            now = time.time()
+            # if the current time predates our last refresh time, then time has been reconfigured on the local system
+            # since we last queried trusted domains. this might have been done to correct issues in kerberos auth, or
+            # unrelated, but either way if time moves in the wrong direction we consider our cache invalid.
+            # if time is moving forwards, then check if it's moved forward more than our lifetime in seconds, and if not
+            # return a copy of our cache
+            if (self._last_trusted_domain_query_time <= now and
+                    now - self._last_trusted_domain_query_time >= self.trusted_domain_cache_lifetime_seconds):
+                # return a shallow copy so that if someone (for example) filters out MIT-type trusts,
+                # it won't affect our cache
+                return copy.copy(self._trusted_domain_list_cache)
+        else:
+            now = time.time()
+
+        trusted_domains = self.domain.find_trusted_domains(self.ldap_connection)
+        # keep a shallow copy so that if someone (for example) filters out MIT-type trusts,
+        # it won't affect our cache
+        self._trusted_domain_list_cache = copy.copy(trusted_domains)
+        self._last_trusted_domain_query_time = now
+        return trusted_domains
 
     # FUNCTIONS FOR FINDING USERS AND GROUPS
 
@@ -604,8 +689,13 @@ class ADSession:
                                               size_limit=size_limit,
                                               attributes=attrs,
                                               controls=controls)
-        _, _, resp, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res,
-                                                                   paginated_response=paginate)
+        _, result, resp, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res,
+                                                                        paginated_response=paginate)
+        search_err = result['result'] != 0
+        if search_err:
+            raise DomainSearchException('An error was encountered searching the domain; this may be due to a '
+                                        'permission issue or an domain resource availability issue. Raw '
+                                        'response: {}'.format(result))
         resp = ldap_utils.remove_ad_search_refs(resp)
         if not resp:
             return []
@@ -1565,7 +1655,7 @@ class ADSession:
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
-        :return: A boolean indicating success.
+        :returns: A boolean indicating success.
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
@@ -1596,7 +1686,7 @@ class ADSession:
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
-        :return: A boolean indicating success.
+        :returns: A boolean indicating success.
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
@@ -1614,7 +1704,7 @@ class ADSession:
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
-        :return: A boolean indicating success.
+        :returns: A boolean indicating success.
         :raises: InvalidLdapParameterException if user is not a string or ADUser object
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
@@ -1634,7 +1724,7 @@ class ADSession:
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
-        :return: A boolean indicating success.
+        :returns: A boolean indicating success.
         :raises: InvalidLdapParameterException if computer is not a string or ADComputer object
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
@@ -1680,7 +1770,7 @@ class ADSession:
                                             SIDs will be granted the right to write. These must be strings.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
-        :return: A boolean indicating if we succeeded in updating the security descriptor.
+        :returns: A boolean indicating if we succeeded in updating the security descriptor.
         :raises: InvalidLdapParameterException if any inputs are the wrong type.
         :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
@@ -1759,7 +1849,7 @@ class ADSession:
                                             SIDs will be granted the right to write. These must be strings.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
-        :return: A boolean indicating if we succeeded in updating the security descriptor.
+        :returns: A boolean indicating if we succeeded in updating the security descriptor.
         :raises: InvalidLdapParameterException if any inputs are the wrong type.
         :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
@@ -1807,7 +1897,7 @@ class ADSession:
                                             SIDs will be granted the right to write. These must be strings.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
-        :return: A boolean indicating if we succeeded in updating the security descriptor.
+        :returns: A boolean indicating if we succeeded in updating the security descriptor.
         :raises: InvalidLdapParameterException if any inputs are the wrong type.
         :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
@@ -1855,7 +1945,7 @@ class ADSession:
                                             SIDs will be granted the right to write. These must be strings.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
-        :return: A boolean indicating if we succeeded in updating the security descriptor.
+        :returns: A boolean indicating if we succeeded in updating the security descriptor.
         :raises: InvalidLdapParameterException if any inputs are the wrong type.
         :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
@@ -2436,14 +2526,32 @@ class ADSession:
         return self.overwrite_attributes_for_object(computer, attribute_to_value_map, controls,
                                                     raise_exception_on_failure)
 
+    # generic utilities for figuring out information about the current user with respect to the domain
+
+    def is_session_user_from_domain(self):
+        """ Return a boolean indicating whether or not the session's user is a member of the domain that we're
+        communicating with, or is trusted from another domain.
+        :returns: True if the user is from the domain we're communicating with, False otherwise.
+        """
+        authz_id = self.who_am_i()
+        if not authz_id:  # anonymous users don't belong to the domain
+            return False
+        netbios_name = self.domain.find_netbios_name(self.ldap_connection)
+        # cast things to uppercase to be safe on the check since domain names aren't case sensitive
+        domain_member_netbios_start = 'U:' + netbios_name.upper() + '\\'
+        return authz_id.upper().startswith(domain_member_netbios_start)
+
     def who_am_i(self):
-        """ Return the authorization identity as recognized by the server.
+        """ Return the authorization identity of the session's user as recognized by the server.
         This can be helpful when a script is provided with an identity in one form that is used to start a session
         (e.g. a distinguished name, or a pre-populated kerberos cache) and then it wants to determine its identity
         that the server actually sees.
         This just calls the LDAP connection function, as it's suitable for AD as well.
+        :returns: A string indicating the authorization identity of the session's user as recognized by the server.
         """
         return self.ldap_connection.extend.standard.who_am_i()
+
+    # internal validation utils
 
     def _validate_group_and_get_group_obj(self, group: Union[str, ADGroup]):
         if isinstance(group, str):
@@ -2506,7 +2614,8 @@ class ADSession:
     def __repr__(self):
         conn_repr = self.ldap_connection.__repr__()
         domain_repr = self.domain.__repr__()
-        return 'ADSession(ldap_connection={}, domain={})'.format(conn_repr, domain_repr)
+        return ('ADSession(ldap_connection={}, domain={}, search_paging_size={}, trusted_domain_cache_lifetime_seconds={})'
+                .format(conn_repr, domain_repr, self.search_paging_size, self.trusted_domain_cache_lifetime_seconds))
 
     def __str__(self):
         return self.__repr__()
