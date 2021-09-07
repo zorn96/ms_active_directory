@@ -129,7 +129,7 @@ from ldap3 import NTLM
 from ms_active_directory import ADDomain
 domain = ADDomain('example.com')
 
-ntlm_name = 'EXAMPLE.COM\computer01'
+ntlm_name = 'EXAMPLE.COM\\computer01'
 password = 'password1'
 session = domain.create_session_as_computer(ntlm_name, password, authentication_mechanism=NTLM)
 ```
