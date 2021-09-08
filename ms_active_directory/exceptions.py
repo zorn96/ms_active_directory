@@ -101,6 +101,11 @@ class SecurityDescriptorEncodeException(MsActiveDirectoryException):
         super().__init__(exception_str)
 
 
+class SessionTransferException(MsActiveDirectoryException):
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class TrustedDomainConversionException(MsActiveDirectoryException):
     def __init__(self, exception_str):
         super().__init__(exception_str)
