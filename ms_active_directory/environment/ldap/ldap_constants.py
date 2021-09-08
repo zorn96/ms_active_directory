@@ -56,6 +56,7 @@ AD_ATTRIBUTE_ADDITIONAL_DNS_HOST_NAME = 'msDS-AdditionalDnsHostName'
 AD_ATTRIBUTE_CA_CERT = 'caCertificate'
 
 # keys for domains and trusted domains
+AD_DOMAIN_DNS_ROOT = 'dnsRoot'
 AD_DOMAIN_FUNCTIONAL_LEVEL = 'domainFunctionality'
 AD_DOMAIN_SUPPORTED_SASL_MECHANISMS = 'supportedSASLMechanisms'
 AD_DOMAIN_TIME = 'currentTime'

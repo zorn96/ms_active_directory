@@ -40,6 +40,7 @@ from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_ENCRYPTION_TYPES,
     AD_ATTRIBUTE_NETBIOS_NAME,
     AD_ATTRIBUTE_OBJECT_CLASS,
+    AD_DOMAIN_DNS_ROOT,
     AD_DOMAIN_FUNCTIONAL_LEVEL,
     AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
     AD_DOMAIN_TIME,
@@ -415,7 +416,8 @@ class ADDomain:
             # we just need an anonymous session to read this information
             ldap_connection = self.create_session_as_user().get_ldap_connection()
         search_base = DOMAIN_WIDE_PARTITIONS_CONTAINER + ',' + construct_ldap_base_dn_from_domain(self.domain)
-        search_filter = '({}={})'.format(AD_ATTRIBUTE_NETBIOS_NAME, VALUE_TO_FIND_ANY_WITH_ATTRIBUTE_POPULATED)
+        search_filter = ('(&({}={})({}={}))'.format(AD_DOMAIN_DNS_ROOT, self.domain, AD_ATTRIBUTE_NETBIOS_NAME,
+                                                    VALUE_TO_FIND_ANY_WITH_ATTRIBUTE_POPULATED))
 
         res = ldap_connection.search(search_base=search_base, search_filter=search_filter,
                                      search_scope=SUBTREE, attributes=[AD_ATTRIBUTE_NETBIOS_NAME],

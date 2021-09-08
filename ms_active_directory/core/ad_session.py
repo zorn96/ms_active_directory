@@ -619,6 +619,17 @@ class ADSession:
         """
         return self.domain.find_functional_level(self.ldap_connection)
 
+    def find_netbios_name_for_domain(self, force_refresh: bool=False):
+        """ Find the netbios name for this domain. Renaming a domain is a huge task and is incredibly rare,
+        so this information is cached when first read, and it only re-read if specifically requested.
+
+        :param force_refresh: If set to true, the domain will be searched for the information even if
+                              it is already cached. Defaults to false.
+        :returns: A string indicating the netbios name of the domain.
+        """
+        return self.domain.find_netbios_name(self.ldap_connection, force_refresh)
+        pass
+
     def find_supported_sasl_mechanisms_for_domain(self):
         """ Attempt to discover the SASL mechanisms supported by the domain and return them.
         This just builds upon the functionality that the domain has for this, as you don't need
