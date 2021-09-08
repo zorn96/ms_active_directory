@@ -40,6 +40,7 @@ from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_ENCRYPTION_TYPES,
     AD_ATTRIBUTE_NETBIOS_NAME,
     AD_ATTRIBUTE_OBJECT_CLASS,
+    AD_DOMAIN_DNS_ROOT,
     AD_DOMAIN_FUNCTIONAL_LEVEL,
     AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
     AD_DOMAIN_TIME,
@@ -64,6 +65,7 @@ from ms_active_directory.exceptions import (
     DomainConnectException,
     DomainSearchException,
     InvalidDomainParameterException,
+    SessionTransferException,
     TrustedDomainConversionException,
 )
 
@@ -415,7 +417,8 @@ class ADDomain:
             # we just need an anonymous session to read this information
             ldap_connection = self.create_session_as_user().get_ldap_connection()
         search_base = DOMAIN_WIDE_PARTITIONS_CONTAINER + ',' + construct_ldap_base_dn_from_domain(self.domain)
-        search_filter = '({}={})'.format(AD_ATTRIBUTE_NETBIOS_NAME, VALUE_TO_FIND_ANY_WITH_ATTRIBUTE_POPULATED)
+        search_filter = ('(&({}={})({}={}))'.format(AD_DOMAIN_DNS_ROOT, self.domain, AD_ATTRIBUTE_NETBIOS_NAME,
+                                                    VALUE_TO_FIND_ANY_WITH_ATTRIBUTE_POPULATED))
 
         res = ldap_connection.search(search_base=search_base, search_filter=search_filter,
                                      search_scope=SUBTREE, attributes=[AD_ATTRIBUTE_NETBIOS_NAME],
@@ -544,6 +547,10 @@ class ADDomain:
         server_pool = ServerPool(servers=copied_servers, pool_strategy=FIRST)
         # if the authentication mechanism is a SASL mechanism, set the authentication mechanism to SASL
         # and move the current authentication mechanism to be the sasl_mechanism in the kwargs
+        if kwargs.get('authentication_mechanism'):
+            logger.debug('authentication_mechanism specified in both kwargs and args: %s and %s',
+                         kwargs.pop('authentication_mechanism'), authentication_mechanism)
+            logger.debug('Chose argument authentication_mechanism %s', authentication_mechanism)
 
         # ntlm isn't real SASL, but Kerberos, EXTERNAL, etc. are.
         if authentication_mechanism in SASL_AVAILABLE_MECHANISMS:
@@ -555,13 +562,13 @@ class ADDomain:
         # behind it (like just the domain name), which can cause connections to break if they're using TLS
         # an experience a dns failover on a synchronous connection. Restartable connections avoid these issues.
         # Use safe restartable in case the caller uses this in a multi-threaded application.
-        if not kwargs.get('client_strategy'):
-            conn = Connection(server_pool, user=user, password=password, authentication=authentication_mechanism,
-                              client_strategy=SAFE_RESTARTABLE, source_address=self.source_ip,
-                              **kwargs)
-        else:
-            conn = Connection(server_pool, user=user, password=password, authentication=authentication_mechanism,
-                              source_address=self.source_ip, **kwargs)
+        client_strat = kwargs.pop('client_strategy', SAFE_RESTARTABLE)
+        # users can use different source addresses for each session if they want. otherwise use the source ip
+        # that was used in domain discovery
+        source_addr = kwargs.pop('source_address', self.source_ip)
+        conn = Connection(server_pool, user=user, password=password, authentication=authentication_mechanism,
+                          client_strategy=client_strat, source_address=source_addr,
+                          **kwargs)
 
         conn.open()
         logger.debug('Opened connection to AD domain %s: %s', self.domain, conn)
@@ -700,7 +707,7 @@ class ADTrustedDomain:
         :param trust_ldap_attributes: A dictionary of LDAP attributes for the trustedDomain.
         """
         self.primary_domain = primary_domain
-        self.domain_fqdn = trust_ldap_attributes.get(AD_TRUSTED_DOMAIN_FQDN)
+        self.domain = trust_ldap_attributes.get(AD_TRUSTED_DOMAIN_FQDN)
         self.netbios_name = trust_ldap_attributes.get(AD_TRUSTED_DOMAIN_NETBIOS_NAME)
         self.trust_type = trust_ldap_attributes.get(AD_TRUST_TYPE, 0)
         # parse our trust direction
@@ -789,7 +796,7 @@ class ADTrustedDomain:
             raise TrustedDomainConversionException('Cannot convert a non-AD trusted domain to an ADDomain object.')
 
         logger.info('Creating ADDomain object for %s which is a trusted domain found in %s',
-                    self.domain_fqdn, self.primary_domain.domain)
+                    self.domain, self.primary_domain.domain)
         if dns_nameservers is None and self.primary_domain.dns_nameservers:
             logger.info('Using DNS nameservers from primary domain %s for new ADDomain, because domains with a '
                         'trust relationship must be mutually routable', self.primary_domain.domain)
@@ -801,7 +808,7 @@ class ADTrustedDomain:
                         'network when connecting to the new ADDomain', self.primary_domain.domain)
             source_ip = self.primary_domain.source_ip
 
-        return ADDomain(self.domain_fqdn, site=site, ldap_servers_or_uris=ldap_servers_or_uris,
+        return ADDomain(self.domain, site=site, ldap_servers_or_uris=ldap_servers_or_uris,
                         kerberos_uris=kerberos_uris, encrypt_connections=encrypt_connections,
                         ca_certificates_file_path=ca_certificates_file_path,
                         discover_ldap_servers=discover_ldap_servers,
@@ -810,7 +817,7 @@ class ADTrustedDomain:
                         netbios_name=self.netbios_name)
 
     def get_fqdn(self):
-        return self.domain_fqdn
+        return self.domain
 
     def get_netbios_name(self):
         return self.netbios_name
@@ -875,6 +882,109 @@ class ADTrustedDomain:
 
     def uses_sid_filtering(self):
         return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_QUARANTINED_DOMAIN_BIT)
+
+    def create_transfer_session_to_trusted_domain(self, ad_session: ADSession, converted_ad_domain: ADDomain=None,
+                                                  skip_validation: bool=False):
+        """ Create a session with this trusted domain that functionally transfers the authentication of a given session.
+        This is useful for transferring a kerberos/ntlm session to create new sessions for querying in trusted domains
+        without needing to provide credentials ever time.
+
+        :param ad_session: The active directory session to transfer. This session will not be altered.
+        :param converted_ad_domain: Optional. If a caller wants to specify information like an AD site, or ldap
+                                    server preferences, or if the caller simply wants to avoid having DNS lookups
+                                    and RTT measurements done every single time they transfer a session because they
+                                    have a lot of sessions to transfer, then they can specify an ADDomain object
+                                    that represents the converted ADTrustedDomain.
+                                    If not specified, an ADDomain will be created for the trusted domain during
+                                    transfer.
+        :param skip_validation: Optional. If set to False, validation checks about the trusted domain being an AD domain
+                                or the trusted domain trusting the primary domain for users originating from the
+                                primary domain will be skipped. This can be set to True in scenarios where the trust
+                                has been reconfigured on the trusted domain, but the primary domain has stale info,
+                                to avoid needing to wait for changes to propagate to make use of the new trust.
+                                If not specified, defaults to True.
+        :returns: An ADSession representing the transferred authentication to the trusted domain.
+        :raises SessionTransferException: If any validation fails when transferring the session.
+        :raises: Other LDAP exceptions if the attempt to bind the transfer session in the trusted domain fails due to
+                 authentication issues (e.g. trying to use a non-transitive trust when transferring a user that is
+                 not from the primary domain, transferring across a one-way trust when skipping validation,
+                 transferring to a domain using SID filtering to restrict cross-domain users)
+        """
+        if skip_validation:
+            logger.info('Skipping validation when transferring session from %s to trusted domain %s',
+                        self.primary_domain.get_domain_dns_name(), self.domain)
+
+        # SIMPLE authentication can't transfer between trusts. this validation cannot be skipped.
+        if ad_session.get_ldap_connection().authentication == SIMPLE:
+            raise SessionTransferException('Active Directory sessions using SIMPLE authentication cannot be '
+                                           'transferred to trusted domains. Either NTLM or some form of SASL (e.g. '
+                                           'Kerberos) must be used.')
+
+        # only transfer to AD domain trusts
+        if (not skip_validation) and not self.is_active_directory_domain_trust():
+            raise SessionTransferException('Active Directory sessions can only be transferred to Active Directory '
+                                           'domain trusts. MIT trusts and non-AD windows trusts are not supported.')
+        session_user_from_primary_domain = ad_session.is_session_user_from_domain()
+        # if the user is from the primary domain, but the trust is one way and the primary domain's users aren't
+        # trusted by this domain, raise an exception
+        if (not skip_validation) and session_user_from_primary_domain and (not self.primary_domain_is_trusted_by_self):
+            session_user = ad_session.who_am_i()
+            raise SessionTransferException('The session user {} is a member of primary domain {} - but the trusted '
+                                           'domain {} does not trust the primary domain, and so sessions cannot be '
+                                           'transferred to it.'.format(session_user,
+                                                                       self.primary_domain.get_domain_dns_name(),
+                                                                       self.domain))
+
+        session_user_from_this_domain = ad_session.find_netbios_name_for_domain() == self.netbios_name
+        # if the user is not from the trusted domain or the primary domain, and the trust is not transitive,
+        # log a warning. we won't fail this because the trusted domain could have an explicit trust relationship
+        # with the primary domain. but there's a decent chance we'll fail here if the current session user is
+        # attempting to authenticate with the trusted domain via implicit trust to the primary domain
+        if ((not skip_validation) and (not session_user_from_this_domain)
+                and (not session_user_from_primary_domain) and (not self.is_transitive_trust())):
+            session_user = ad_session.who_am_i()
+            logger.warning('Attempting to transfer authentication for user %s from domain %s to trusted domain %s - '
+                           'however, the user does not belong to either domain and the trust is not transitive. So '
+                           'this transfer is likely to fail unless the trusted domain has an explicit trust '
+                           'relationship with the original domain of the user', session_user,
+                           self.primary_domain.get_domain_dns_name(), self.domain)
+
+        # if we didn't get a converted AD domain passed in, then just make one now. we support passing one in
+        # so that users can convert the trust themselves and set information like site and server preferences,
+        # and cut down on dns discovery costs if they'll transfer a lot of sessions
+        if converted_ad_domain is None:
+            logger.info('Creating new converted AD domain from trusted domain for %s', self.domain)
+            converted_ad_domain = self.convert_to_ad_domain()
+
+        session_conn = ad_session.get_ldap_connection()
+
+        # copy the connection using all relevant attributes.
+        # if ldap3 adds more things, this may need to become versioned and have new things added to it.
+        # we may also support old ldap3 versions if there's high demand and if I'm feeling particularly
+        # generous, so if that happens we may also need to version this.
+        return converted_ad_domain.create_session_as_user(session_conn.user, session_conn.password,
+                                                          authentication_mechanism=session_conn.authentication,
+                                                          auto_encode=session_conn.auto_encode,
+                                                          auto_escape=session_conn.auto_escape,
+                                                          auto_referrals=session_conn.auto_referrals,
+                                                          check_names=session_conn.check_names,
+                                                          client_strategy=session_conn.strategy_type,
+                                                          cred_store=session_conn.cred_store,
+                                                          fast_decoder=session_conn.fast_decoder,
+                                                          lazy=session_conn.lazy,
+                                                          pool_keepalive=session_conn.pool_keepalive,
+                                                          pool_lifetime=session_conn.pool_lifetime,
+                                                          pool_name=session_conn.pool_name,
+                                                          pool_size=session_conn.pool_size,
+                                                          raise_exceptions=session_conn.raise_exceptions,
+                                                          read_only=session_conn.read_only,
+                                                          receive_timeout=session_conn.receive_timeout,
+                                                          return_empty_attributes=session_conn.empty_attributes,
+                                                          sasl_mechanism=session_conn.sasl_mechanism,
+                                                          sasl_credentials=session_conn.sasl_credentials,
+                                                          source_address=session_conn.source_address,
+                                                          source_port_list=session_conn.source_port_list,
+                                                          use_referral_cache=session_conn.use_referral_cache)
 
     def __repr__(self):
         return ('ADTrustedDomain(primary_domain={}, trust_ldap_attributes={})'

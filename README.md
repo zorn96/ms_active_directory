@@ -20,14 +20,17 @@ and all LDAP basic, NTLM, and SASL authentication mechanisms (e.g. Kerberos) sup
 2. Discovering domain resources and properties, optimizing domain communication for the network
 3. Discovering trusted domains, including MIT Kerberos domains and trusted Active Directory domains, and their
    attributes (e.g. are the trusts transitive? is SID filtering used? what direction is the trust?)
-4. Finding users, computers, and groups based on a variety of properties (e.g. name, SID, user-specified properties)
-5. Querying information about users, computers, groups, and generic objects
-6. Looking up user, computer, and group memberships
-7. Adding and removing users, computers, and groups to and from other groups
-8. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
-9. Looking up information about the permissions set on a user, computer, group, or generic object
-10. Adding permissions to the security descriptor for a user, computer, group, or generic object
-11. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
+4. Transferring authenticated sessions from one domain to its trusted domains, allowing for easy querying
+   capability across domains for widely trusted users. This can be used to trace foreign security principals
+   across domains without needing to spin up and manage new domain objects for each.
+5. Finding users, computers, and groups based on a variety of properties (e.g. name, SID, user-specified properties)
+6. Querying information about users, computers, groups, and generic objects
+7. Looking up user, computer, and group memberships
+8. Adding and removing users, computers, and groups to and from other groups
+9. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
+10. Looking up information about the permissions set on a user, computer, group, or generic object
+11. Adding permissions to the security descriptor for a user, computer, group, or generic object
+12. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
     or overwriting values.
 
 
@@ -129,7 +132,7 @@ from ldap3 import NTLM
 from ms_active_directory import ADDomain
 domain = ADDomain('example.com')
 
-ntlm_name = 'EXAMPLE.COM\computer01'
+ntlm_name = 'EXAMPLE.COM\\computer01'
 password = 'password1'
 session = domain.create_session_as_computer(ntlm_name, password, authentication_mechanism=NTLM)
 ```
@@ -793,4 +796,54 @@ for dom in domains_our_user_can_auth_with:
     session = dom.create_session_as_user(widely_trusted_user, password,
                                          authentication_mechanism=NTLM)
     all_user_sessions.append(session)                                     
+```
+
+You can convert an existing authenticated session with one domain into an
+authenticated session with a trusted AD domain that trusts the first domain.
+```
+from ms_active_directory import ADDomain
+from ldap3 import NTLM
+domain = ADDomain('example.com')
+widely_trusted_user = 'example.com\\org-admin'
+password = 'password'
+
+primary_session = domain.create_session_as_user(widely_trusted_user, password,
+                                                authentication_mechanism=NTLM)
+
+# get our trusted AD domains
+trusted_domains = session.find_trusted_domains_for_domain()
+# filter for a domain being AD and it trusting the primary domain
+trusted_ad_domains = [dom for dom in trusted_domains if dom.is_active_directory_domain_trust()
+                      and dom.trusts_primary_domain()]
+
+# create a new session with the trusted domain using our existing primary domain session,
+# and use it to look up users/groups/etc. in the other domain
+transferred_session = trusted_ad_domains[0].create_transfer_session_to_trusted_domain(primary_session)
+transferred_session.find_user_by_name('other-domain-user')
+```
+
+You can also automatically have a session create sessions for all its trusted domains
+that trust the session's domain.
+```
+from ms_active_directory import ADDomain
+from ldap3 import NTLM
+domain = ADDomain('example.com')
+widely_trusted_user = 'example.com\\org-admin'
+password = 'password'
+
+primary_session = domain.create_session_as_user(widely_trusted_user, password,
+                                                authentication_mechanism=NTLM)
+
+# find a user that we know exists somewhere, but not the primary domain
+user_to_find = 'some-lost-user'
+# by default this filters to AD domains, and further filters to domains that trust the session's domain
+# if the user used for the session is from the session's domain (which they are in this
+# example)
+trust_sessions = primary_session.create_transfer_sessions_to_all_trusted_domains()
+user = None
+for session in trust_sessions:
+    user = session.find_user_by_name(user_to_find)
+    if user is not None:
+        print('Found user in {}'.format(session.get_domain_dns_name()))
+        break
 ```

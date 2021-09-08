@@ -10,6 +10,7 @@ from ldap3 import (
     Connection,
     MODIFY_ADD,
     MODIFY_REPLACE,
+    SIMPLE,
     SUBTREE,
 )
 from ldap3.protocol.rfc4511 import Control
@@ -38,6 +39,7 @@ from ms_active_directory.exceptions import (
     ObjectCreationException,
     ObjectNotFoundException,
     PermissionDeniedException,
+    SessionTransferException,
 )
 
 logger = logging_utils.get_logger()
@@ -618,6 +620,17 @@ class ADSession:
         :returns: An Enum of type ADFunctionalLevel indicating the functional level.
         """
         return self.domain.find_functional_level(self.ldap_connection)
+
+    def find_netbios_name_for_domain(self, force_refresh: bool=False):
+        """ Find the netbios name for this domain. Renaming a domain is a huge task and is incredibly rare,
+        so this information is cached when first read, and it only re-read if specifically requested.
+
+        :param force_refresh: If set to true, the domain will be searched for the information even if
+                              it is already cached. Defaults to false.
+        :returns: A string indicating the netbios name of the domain.
+        """
+        return self.domain.find_netbios_name(self.ldap_connection, force_refresh)
+        pass
 
     def find_supported_sasl_mechanisms_for_domain(self):
         """ Attempt to discover the SASL mechanisms supported by the domain and return them.
@@ -2527,6 +2540,45 @@ class ADSession:
                                                     raise_exception_on_failure)
 
     # generic utilities for figuring out information about the current user with respect to the domain
+    # and managing trusts
+
+    def create_transfer_sessions_to_all_trusted_domains(self, ignore_and_remove_failed_transfers=False):
+        """ Create transfer sessions to all of the different active directory domains that trust the domain used for
+        this session.
+
+        :param ignore_and_remove_failed_transfers: If true, failures to transfer the session to a trusted domain will
+                                                   be ignored, and will be excluded from results. If false, errors will
+                                                   be raised by failed transfers. Defaults to false.
+        :returns: A list of ADSession objects representing the transferred authentication to the trusted domains.
+        :raises: Other LDAP exceptions if the attempt to bind the transfer session in the trusted domain fails due to
+                 authentication issues (e.g. trying to use a non-transitive trust when transferring a user that is
+                 not from the primary domain, transferring across a one-way trust when skipping validation,
+                 transferring to a domain using SID filtering to restrict cross-domain users)
+        """
+        # SIMPLE authentication can't transfer between trusts.
+        if self.ldap_connection.authentication == SIMPLE:
+            raise SessionTransferException('Active Directory sessions using SIMPLE authentication cannot be '
+                                           'transferred to trusted domains. Either NTLM or some form of SASL (e.g. '
+                                           'Kerberos) must be used.')
+
+        trusted_domains = self.find_trusted_domains_for_domain()
+        ad_transferable_domains = [trusted_dom for trusted_dom in trusted_domains
+                                    if trusted_dom.is_active_directory_domain_trust()]
+        # if this session's user is from the domain that this session exists with, filter further to only domains
+        # that trust that domain
+        if self.is_session_user_from_domain():
+            ad_transferable_domains = [trusted_dom for trusted_dom in ad_transferable_domains
+                                       if trusted_dom.trusts_primary_domain()]
+        logger.info('Transferring session to %s domains', len(ad_transferable_domains))
+        transferred_sessions = []
+        for trusted_dom in ad_transferable_domains:
+            try:
+                transferred_sessions.append(trusted_dom.create_transfer_session_to_trusted_domain(self))
+            except:
+                if ignore_and_remove_failed_transfers:
+                    continue
+                raise
+        return transferred_sessions
 
     def is_session_user_from_domain(self):
         """ Return a boolean indicating whether or not the session's user is a member of the domain that we're
