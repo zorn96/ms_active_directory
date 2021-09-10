@@ -1,4 +1,5 @@
 import copy
+import re
 import socket
 import ssl
 import time
@@ -8,6 +9,7 @@ from ms_active_directory import logging_utils
 from ldap3 import (
     BASE,
     Connection,
+    LEVEL,
     MODIFY_ADD,
     MODIFY_REPLACE,
     SIMPLE,
@@ -26,7 +28,13 @@ import ms_active_directory.environment.security.security_config_constants as sec
 import ms_active_directory.environment.security.security_descriptor_utils as sd_utils
 
 from ms_active_directory.core.managed_ad_objects import ManagedADComputer
-from ms_active_directory.core.ad_objects import ADComputer, ADGroup, ADUser, ADObject
+from ms_active_directory.core.ad_objects import (
+    ADComputer,
+    ADGroup,
+    ADUser,
+    ADObject,
+    cast_ad_object_to_specific_object_type,
+)
 from ms_active_directory.environment.security.ad_security_guids import ADRightsGuid
 from ms_active_directory.exceptions import (
     AttributeModificationException,
@@ -287,9 +295,25 @@ class ADSession:
         else:
             computer_location = ldap_utils.normalize_object_location_in_domain(computer_location,
                                                                                self.domain_dns_name)
-        if not self.dn_exists_in_domain(computer_location):
-            raise DomainJoinException('The computer location {} cannot be found in the domain.'
-                                      .format(computer_location))
+            # make sure our location exists
+            if ldap_utils.is_dn(computer_location):
+                location_obj = self.find_object_by_distinguished_name(computer_location)
+            else:
+                location_obj = self.find_object_by_canonical_name(computer_location)
+            if location_obj is None:
+                raise DomainJoinException('The computer location {} cannot be found in the domain.'
+                                          .format(computer_location))
+            # make sure our location is a container
+            is_container_or_ou = (location_obj.is_of_object_class(ldap_constants.ORGANIZATIONAL_UNIT_OBJECT_CLASS)
+                                  or location_obj.is_of_object_class(ldap_constants.CONTAINER_OBJECT_CLASS))
+            if not is_container_or_ou:
+                raise DomainJoinException('The specified computer location {} exists, but is not a container or an '
+                                          'organizational unit, and so a computer cannot be created there.')
+            # make sure that going forward we have an LDAP-style relative distinguished name for our
+            # location
+            computer_location = ldap_utils.normalize_object_location_in_domain(location_obj.distinguished_name,
+                                                                               self.domain_dns_name)
+
         # now we can build our full object distinguished name
         computer_dn = ldap_utils.construct_object_distinguished_name(computer_name, computer_location,
                                                                      self.domain_dns_name)
@@ -939,6 +963,80 @@ class ADSession:
         if results:
             return results[0]
         return None
+
+    def find_object_by_canonical_name(self, canonical_name: str, attributes_to_lookup: List[str]=None,
+                                      controls: List[Control]=None):
+        """ Find an object in the domain using a canonical name, also called a 'windows path style' name.
+
+        :param canonical_name: A windows path style name representing an object in the domain. This may be either a
+                               fully canonical name (e.g. example.com/Users/Administrator) or a relative canonical
+                               name (e.g. /Users/Administrator).
+        :param attributes_to_lookup: Attributes to look up about the object. Regardless of what's specified,
+                                     the object's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADObject object or None if the distinguished name does not exist. If the object can be cast to
+                  a more specific subclass, like ADUser, then it will be.
+        """
+        if ldap_utils.is_dn(canonical_name):
+            raise InvalidLdapParameterException('{} is not in the format of a windows canonical name. Example: '
+                                                'example.com/Users/Admins'.format(canonical_name))
+        normalized_canonical_name = ldap_utils.normalize_object_location_in_domain(canonical_name,
+                                                                                   self.domain_dns_name)
+        # you cannot search by canonical name because it's a constructed attribute.
+        # so instead we do once search at each level, building our way down until we either
+        # hit a level where a piece is missing, or until we find the full distinguished name version
+        # of the windows path name
+        name_pieces = re.split(r'(?<!\\)/', normalized_canonical_name)  # split on unescaped / characters
+        num_pieces = len(name_pieces)
+        ad_obj = None
+        if num_pieces == 0:
+            return None
+        logger.info('Split windows style path into %s pieces to conduct search', num_pieces)
+        current_location = self._domain_validation_search_base
+        for index, piece in enumerate(name_pieces):
+            escaped_piece_name = ldap_utils.escape_generic_filter_value(piece)
+            logger.info('Searching for %s within %s', escaped_piece_name, current_location)
+            # use name instead of common name in order to work for OUs and Containers
+            to_find = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_NAME, piece)
+            attrs = []
+            if index == num_pieces-1:  # last object, get the attributes
+                attrs = attributes_to_lookup
+            ad_objs = self._find_ad_objects_and_attrs(current_location, to_find, LEVEL,
+                                                      attrs, 1, ADObject, controls=controls)
+            if not ad_objs:
+                return None
+            ad_obj = ad_objs[0]
+            current_location = ad_obj.distinguished_name
+        return cast_ad_object_to_specific_object_type(ad_obj)
+
+    def find_object_by_distinguished_name(self, distinguished_name: str, attributes_to_lookup: List[str]=None,
+                                          controls: List[Control]=None):
+        """ Find an object in the domain using a relative distinguished name or full distinguished name.
+
+        :param distinguished_name: A relative or absolute distinguished name within the domain to look up.
+        :param attributes_to_lookup: Attributes to look up about the object. Regardless of what's specified,
+                                     the object's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADObject object or None if the distinguished name does not exist. If the object can be cast to
+                  a more specific subclass, like ADUser, then it will be.
+        """
+        if not ldap_utils.is_dn(distinguished_name):
+            raise InvalidLdapParameterException('{} does not comply with the format of an LDAP distinguished name.'
+                                                .format(distinguished_name))
+        # if we have a full distinguished name down to the DC= then don't include our domain search base.
+        # otherwise we've got an RDN and should look in the session's configured search base
+        if not distinguished_name.lower().endswith(self._domain_validation_search_base.lower()):
+            distinguished_name = distinguished_name + ',' + self.domain_search_base
+        ad_objs = self._find_ad_objects_and_attrs(distinguished_name, ldap_constants.FIND_ANYTHING_FILTER,
+                                                  BASE, attributes_to_lookup, 1, ADObject, controls=controls)
+        if not ad_objs:
+            return None
+        ad_obj = ad_objs[0]
+        return cast_ad_object_to_specific_object_type(ad_obj)
 
     def find_computers_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str]=None,
                                     size_limit: int=0, controls: List[Control]=None):

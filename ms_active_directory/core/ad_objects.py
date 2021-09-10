@@ -14,9 +14,34 @@ from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_UID_NUMBER,
     AD_ATTRIBUTE_UNIX_HOME_DIR,
     AD_ATTRIBUTE_UNIX_LOGIN_SHELL,
+    COMPUTER_OBJECT_CLASS,
+    GROUP_OBJECT_CLASS,
+    POSIX_GROUP_OBJECT_CLASS,
+    POSIX_USER_OBJECT_CLASS,
+    USER_OBJECT_CLASS,
     UNKNOWN_GROUP_POSIX_GID,
     UNKNOWN_USER_POSIX_UID,
 )
+
+
+def cast_ad_object_to_specific_object_type(ad_obj: 'ADObject'):
+    """ Given an AD Object, find a more specific subclass for it and cast it. """
+    obj_type = None
+    if ad_obj.is_of_object_class(COMPUTER_OBJECT_CLASS):  # computers are also users so check this first
+        obj_type = ADComputer
+    elif ad_obj.is_of_object_class(USER_OBJECT_CLASS):
+        obj_type = ADUser
+        if ad_obj.is_of_object_class(POSIX_USER_OBJECT_CLASS):
+            obj_type = ADPosixUser
+    elif ad_obj.is_of_object_class(GROUP_OBJECT_CLASS):
+        obj_type = ADGroup
+        if ad_obj.is_of_object_class(POSIX_GROUP_OBJECT_CLASS):
+            obj_type = ADPosixGroup
+
+    # return as is if we can't find anything more specific
+    if not obj_type:
+        return ad_obj
+    return obj_type(ad_obj.distinguished_name, ad_obj.all_attributes, ad_obj.domain)
 
 
 # the parent of all ADObjects, defined here to avoid risk of circular imports
@@ -27,6 +52,7 @@ class ADObject:
         self.distinguished_name = dn
         self.domain = domain
         self.all_attributes = attributes if attributes else {}
+        self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS)
         # used for __repr__
         self.class_name = 'ADObject'
 
@@ -47,6 +73,14 @@ class ADObject:
             return copy.deepcopy(val[0])
         return copy.deepcopy(val)
 
+    def is_of_object_class(self, obj_cls: str):
+        """ Returns true if this object has the specified object class as one of its object classes. """
+        if (not obj_cls) or (not self.object_classes):
+            return False
+        obj_cls = obj_cls.lower()
+        return obj_cls in [o_cls.lower() for o_cls in self.object_classes]
+
+
     def __repr__(self):
         attrs = self.all_attributes.__repr__() if self.all_attributes else 'None'
         domain = self.domain.__repr__()
@@ -65,7 +99,6 @@ class ADComputer(ADObject):
         self.class_name = 'ADComputer'
         self.samaccount_name = attributes.get(AD_ATTRIBUTE_SAMACCOUNT_NAME)
         self.common_name = attributes.get(AD_ATTRIBUTE_COMMON_NAME)
-        self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS)
 
         self.name = self.samaccount_name
         if self.name.endswith('$'):
@@ -80,7 +113,6 @@ class ADUser(ADObject):
         self.class_name = 'ADUser'
         self.samaccount_name = attributes.get(AD_ATTRIBUTE_SAMACCOUNT_NAME)
         self.common_name = attributes.get(AD_ATTRIBUTE_COMMON_NAME)
-        self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS)
 
         self.name = self.samaccount_name
 
@@ -120,7 +152,6 @@ class ADGroup(ADObject):
         self.class_name = 'ADGroup'
         self.samaccount_name = attributes.get(AD_ATTRIBUTE_SAMACCOUNT_NAME)
         self.common_name = attributes.get(AD_ATTRIBUTE_COMMON_NAME)
-        self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS)
 
         self.name = self.samaccount_name
 
