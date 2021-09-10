@@ -167,7 +167,8 @@ def escape_bytestring_for_filter(byte_str: bytes):
     return hex_escape_char + hex_escape_char.join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
 
 
-def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], lookup_by_name_fn: callable, controls: List):
+def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], lookup_by_name_fn: callable, controls: List,
+                                     skip_validation=False):
     """ Given a list of entities that might be AD objects or strings, return a map of LDAP distinguished names
     for the entities.
     """
@@ -176,7 +177,7 @@ def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], looku
     entity_dns = {}
     for entity in entities:
         if isinstance(entity, str):
-            if is_dn(entity):
+            if skip_validation or is_dn(entity):  # skip our mapping to dn if we don't care about the input format
                 # cast to lowercase for case-insensitive checks later
                 entity_dn = entity.lower()
             elif lookup_by_name_fn is None:

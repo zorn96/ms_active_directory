@@ -1263,7 +1263,8 @@ class ADSession:
     # FUNCTIONS FOR FINDING MEMBERSHIP INFORMATION
 
     def find_groups_for_entities(self, entities: List[Union[str, ADObject]], attributes_to_lookup: List[str]=None,
-                                 lookup_by_name_fn: callable=None, controls: List[Control]=None):
+                                 lookup_by_name_fn: callable=None, controls: List[Control]=None,
+                                 skip_validation: bool=False):
         """ Find the parent groups for all of the entities in a List.
         These entities may be users, groups, or anything really because Active Directory uses the "groupOfNames" style
         membership tracking, so all group members are just represented as distinguished names regardless of type.
@@ -1282,6 +1283,10 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A dictionary mapping input entities to lists of ADGroup object representing their parent groups.
         :raises: a DuplicateNameException if an entity name is specified and more than one entry exists with the name.
         :raises: InvalidLdapParameterException if any non-string non-ADObject types are found in entities, or if any
@@ -1289,10 +1294,11 @@ class ADSession:
         """
         # make a map of entity distinguished names to entities passed in. we'll use this when constructing
         # our return dictionary as well
-        entity_dns = ldap_utils.normalize_entities_to_entity_dns(entities, lookup_by_name_fn, controls)
+        entity_dns_to_entities = ldap_utils.normalize_entities_to_entity_dns(entities, lookup_by_name_fn, controls,
+                                                                             skip_validation)
 
         filter_pieces = []
-        for entity_dn in entity_dns:
+        for entity_dn in entity_dns_to_entities:
             filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_MEMBER,
                                             ldap_utils.escape_dn_for_filter(entity_dn))
             filter_pieces.append(filter_piece)
@@ -1335,15 +1341,15 @@ class ADSession:
             # cast all members to lowercase for a case-insensitive membership check. our normalization
             # function gave use lowercase DNs
             member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER))
-            for entity_dn in entity_dns:
+            for entity_dn in entity_dns_to_entities:
                 if entity_dn in member_set:
                     # get our input entity for the result dict
-                    entity = entity_dns[entity_dn]
+                    entity = entity_dns_to_entities[entity_dn]
                     mapping_dict[entity].append(result)
         return mapping_dict
 
     def find_groups_for_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str]=None,
-                              controls: List[Control]=None):
+                              controls: List[Control]=None, skip_validation: bool=False):
         """ Find the groups that a group belongs to, look up attributes of theirs, and return information about them.
 
         :param group: The group to lookup group memberships for. This can either be an ADGroup or a string name of an
@@ -1353,16 +1359,20 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A list of ADGroup objects representing the groups that this group belongs to.
         :raises: a DuplicateNameException if a group name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if the group name is not a string or ADGroup.
         """
         result_dict = self.find_groups_for_entities([group], attributes_to_lookup, self.find_group_by_name,
-                                                    controls)
+                                                    controls, skip_validation=skip_validation)
         return result_dict[group]
 
     def find_groups_for_groups(self, groups: List[Union[str, ADGroup]], attributes_to_lookup: List[str]=None,
-                               controls: List[Control]=None):
+                               controls: List[Control]=None, skip_validation: bool=False):
         """ Find the groups that a list of groups belong to, look up attributes of theirs, and return information about
         them.
 
@@ -1370,17 +1380,22 @@ class ADSession:
                        string names of AD groups. If they are strings, the groups will be looked up first to get unique
                        distinguished name information about them unless they are distinguished names.
         :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
-        :returns: A dictionary mapping groups to lists of ADGroup objects representing the groups that they belong to.
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: A dictionary mapping groups to lists of ADGroup objects representing the groups that they belong to.
         :raises: a DuplicateNameException if a group name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if any groups are not a string or ADGroup.
         """
-        return self.find_groups_for_entities(groups, attributes_to_lookup, self.find_group_by_name, controls)
+        return self.find_groups_for_entities(groups, attributes_to_lookup, self.find_group_by_name, controls,
+                                             skip_validation=skip_validation)
 
     def find_groups_for_user(self, user: Union[str, ADUser], attributes_to_lookup: List[str]=None,
-                             controls: List[Control]=None):
+                             controls: List[Control]=None, skip_validation: bool=False):
         """ Find the groups that a user belongs to, look up attributes of theirs, and return information about them.
 
         :param user: The user to lookup group memberships for. This can either be an ADUser or a string name of an
@@ -1390,15 +1405,20 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A list of ADGroup objects representing the groups that this user belongs to.
         :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if the user name is not a string or ADUser.
         """
-        result_dict = self.find_groups_for_entities([user], attributes_to_lookup, self.find_user_by_name, controls)
+        result_dict = self.find_groups_for_entities([user], attributes_to_lookup, self.find_user_by_name, controls,
+                                                    skip_validation=skip_validation)
         return result_dict[user]
 
     def find_groups_for_users(self, users: List[Union[str, ADUser]], attributes_to_lookup: List[str]=None,
-                              controls: List[Control]=None):
+                              controls: List[Control]=None, skip_validation: bool=False):
         """ Find the groups that a list of users belong to, look up attributes of theirs, and return information about
         them.
 
@@ -1409,14 +1429,19 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A dictionary mapping users to lists of ADGroup objects representing the groups that they belong to.
         :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if any users are not a string or ADUser.
         """
-        return self.find_groups_for_entities(users, attributes_to_lookup, self.find_user_by_name, controls)
+        return self.find_groups_for_entities(users, attributes_to_lookup, self.find_user_by_name, controls,
+                                             skip_validation=skip_validation)
 
     def find_groups_for_computer(self, computer: Union[str, ADComputer], attributes_to_lookup: List[str]=None,
-                                 controls: List[Control]=None):
+                                 controls: List[Control]=None, skip_validation: bool=False):
         """ Find the groups that a computer belongs to, look up attributes of theirs, and return information about them.
 
         :param computer: The computer to lookup group memberships for. This can either be an ADComputer or a string
@@ -1426,16 +1451,20 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A list of ADGroup objects representing the groups that this user belongs to.
         :raises: a DuplicateNameException if a computer name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if the computer name is not a string or ADComputer.
         """
         result_dict = self.find_groups_for_entities([computer], attributes_to_lookup, self.find_computer_by_name,
-                                                    controls)
+                                                    controls, skip_validation=skip_validation)
         return result_dict[computer]
 
     def find_groups_for_computers(self, computers: List[Union[str, ADComputer]], attributes_to_lookup: List[str]=None,
-                                  controls: List[Control]=None):
+                                  controls: List[Control]=None, skip_validation: bool=False):
         """ Find the groups that a list of computers belong to, look up attributes of theirs, and return information
         about them.
 
@@ -1446,18 +1475,23 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A dictionary mapping computers to lists of ADGroup objects representing the groups that they belong to
         :raises: a DuplicateNameException if a computer name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if any computers are not a string or ADComputer.
         """
-        return self.find_groups_for_entities(computers, attributes_to_lookup, self.find_computer_by_name, controls)
+        return self.find_groups_for_entities(computers, attributes_to_lookup, self.find_computer_by_name, controls,
+                                             skip_validation=skip_validation)
 
     # FUNCTIONS FOR MODIFYING MEMBERSHIPS
 
     def _something_members_to_or_from_groups(self, members: List[Union[str, ADObject]],
                                              groups_to_modify: List[Union[str, ADGroup]],
                                              member_lookup_fn: callable, stop_and_rollback_on_error: bool,
-                                             adding: bool, controls: List[Control]):
+                                             adding: bool, controls: List[Control], skip_validation: bool):
         """ Either add or remove members to/from groups. Members may be users or groups or string distinguished names.
         If there are any failures adding/removing for a group, and stop_and_rollback_on_error is True, we will attempt
         to undo the changes that have been done. If rollback fails, we will raise an exception. If it succeeds, we still
@@ -1476,12 +1510,20 @@ class ADSession:
         # normalize our inputs to get lists of lowercase dns
         normalized_member_dns = ldap_utils.normalize_entities_to_entity_dns(members,
                                                                             member_lookup_fn,
-                                                                            controls)
+                                                                            controls, skip_validation)
         member_dn_list = list(normalized_member_dns.keys())
         normalized_target_group_dns = ldap_utils.normalize_entities_to_entity_dns(groups_to_modify,
                                                                                   self.find_group_by_name,
-                                                                                  controls)
+                                                                                  controls, skip_validation)
         target_group_list = list(normalized_target_group_dns.keys())
+
+        overlap = set(target_group_list).intersection(set(member_dn_list))
+        if overlap:
+            # this can only happen for groups
+            verb = 'added to' if adding else 'removed from'
+            raise MembershipModificationException('Groups may not be {} themselves. The following group(s) '
+                                                  'appeared in both the list of members to add and the list of '
+                                                  'groups to add them to: {}'.format(verb, ', '.join(overlap)))
 
         # track successful groups in case we need to rollback, and rollback status
         successful_groups = []
@@ -1506,7 +1548,9 @@ class ADSession:
                         # don't attempt to rollback the rollback
                         self._something_members_to_or_from_groups(member_dn_list, successful_groups, member_lookup_fn,
                                                                   stop_and_rollback_on_error=False, adding=new_op,
-                                                                  controls=controls)
+                                                                  # we already validated and don't need to redo it
+                                                                  # on rollback
+                                                                  controls=controls, skip_validation=True)
                     except MembershipModificationException:
                         logger.error('Failed to completely rollback changes after failure. '
                                      'Halting and raising exception')
@@ -1533,47 +1577,205 @@ class ADSession:
 
     def add_groups_to_groups(self, groups_to_add: List[Union[str, ADGroup]],
                              groups_to_add_them_to: List[Union[str, ADGroup]],
-                             stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
+                             stop_and_rollback_on_error: bool=True, controls: List[Control]=None,
+                             skip_validation: bool=False):
+        """ Add one or more groups to one or more other groups as members. This function attempts to be idempotent
+        and will not re-add groups that are already members.
+
+        :param groups_to_add: A list of groups to add to other groups. These may either be ADGroup objects or string
+                              name identifiers for groups.
+        :param groups_to_add_them_to: A list of groups to add members to. These may either be ADGroup objects or string
+                                      name identifiers for groups.
+        :param stop_and_rollback_on_error: If true, failure to add any of the groups to any of the other groups will
+                                           cause us to try and remove any groups that have been added from any of the
+                                           groups that we successfully added members to.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: A list of groups that successfully had members added. This will always be all the groups unless
+                  stop_and_rollback_on_error is False.
+        :raises: MembershipModificationException if any groups being added also exist in the groups to add them to, or
+                 if we fail to add groups to any other groups and rollback succeeds.
+        :raises: MembershipModificationRollbackException if we fail to add any groups to other groups, and then also
+                 fail when removing the groups that had been added successfully, leaving us in a partially completed
+                 state. This may occur if the session has permission to add members but not to remove members.
+        """
         return self._something_members_to_or_from_groups(groups_to_add, groups_to_add_them_to, self.find_group_by_name,
-                                                         stop_and_rollback_on_error, adding=True, controls=controls)
+                                                         stop_and_rollback_on_error, adding=True, controls=controls,
+                                                         skip_validation=skip_validation)
 
     def add_users_to_groups(self, users_to_add: List[Union[str, ADUser]],
                             groups_to_add_them_to: List[Union[str, ADGroup]],
-                            stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
+                            stop_and_rollback_on_error: bool=True, controls: List[Control]=None,
+                            skip_validation: bool=False):
+        """ Add one or more users to one or more groups as members. This function attempts to be idempotent
+        and will not re-add users that are already members.
+
+        :param users_to_add: A list of users to add to other groups. These may either be ADUser objects or string
+                             name identifiers for users.
+        :param groups_to_add_them_to: A list of groups to add members to. These may either be ADGroup objects or string
+                                      name identifiers for groups.
+        :param stop_and_rollback_on_error: If true, failure to add any of the users to any of the groups will
+                                           cause us to try and remove any users that have been added from any of the
+                                           groups that we successfully added members to.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: A list of groups that successfully had members added. This will always be all the groups unless
+                  stop_and_rollback_on_error is False.
+        :raises: MembershipModificationException if we fail to add groups to any other groups and rollback succeeds.
+        :raises: MembershipModificationRollbackException if we fail to add any groups to other groups, and then also
+                 fail when removing the groups that had been added successfully, leaving us in a partially completed
+                 state. This may occur if the session has permission to add members but not to remove members.
+        """
         return self._something_members_to_or_from_groups(users_to_add, groups_to_add_them_to, self.find_user_by_name,
-                                                         stop_and_rollback_on_error, adding=True, controls=controls)
+                                                         stop_and_rollback_on_error, adding=True, controls=controls,
+                                                         skip_validation=skip_validation)
 
     def add_computers_to_groups(self, computers_to_add: List[Union[str, ADComputer]],
                                 groups_to_add_them_to: List[Union[str, ADGroup]],
-                                stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
+                                stop_and_rollback_on_error: bool=True, controls: List[Control]=None,
+                                skip_validation: bool=False):
+        """ Add one or more computers to one or more groups as members. This function attempts to be idempotent
+        and will not re-add computers that are already members.
+
+        :param computers_to_add: A list of computers to add to other groups. These may either be ADComputer objects or
+                                 string name identifiers for computers.
+        :param groups_to_add_them_to: A list of groups to add members to. These may either be ADGroup objects or string
+                                      name identifiers for groups.
+        :param stop_and_rollback_on_error: If true, failure to add any of the computers to any of the groups will
+                                           cause us to try and remove any computers that have been added from any of the
+                                           groups that we successfully added members to.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: A list of groups that successfully had members added. This will always be all the groups unless
+                  stop_and_rollback_on_error is False.
+        :raises: MembershipModificationException if we fail to add groups to any other groups and rollback succeeds.
+        :raises: MembershipModificationRollbackException if we fail to add any groups to other groups, and then also
+                 fail when removing the groups that had been added successfully, leaving us in a partially completed
+                 state. This may occur if the session has permission to add members but not to remove members.
+        """
         return self._something_members_to_or_from_groups(computers_to_add, groups_to_add_them_to,
                                                          self.find_computer_by_name, stop_and_rollback_on_error,
-                                                         adding=True, controls=controls)
+                                                         adding=True, controls=controls,
+                                                         skip_validation=skip_validation)
 
     def remove_groups_from_groups(self, groups_to_remove: List[Union[str, ADGroup]],
                                   groups_to_remove_them_from: List[Union[str, ADGroup]],
-                                  stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
+                                  stop_and_rollback_on_error: bool=True, controls: List[Control]=None,
+                                  skip_validation: bool=False):
+        """ Remove one or more groups from one or more groups as members. This function attempts to be idempotent
+        and will not remove groups that are not already members.
+
+        :param groups_to_remove: A list of groups to remove from other groups. These may either be ADGroup objects or
+                                 string name identifiers for groups.
+        :param groups_to_remove_them_from: A list of groups to remove members from. These may either be ADGroup objects
+                                           or string name identifiers for groups.
+        :param stop_and_rollback_on_error: If true, failure to remove any of the groups from any of the other groups
+                                           will cause us to try and add any groups that have been removed back to any
+                                           of the groups that we successfully removed members from.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: A list of groups that successfully had members removed. This will always be all the groups unless
+                  stop_and_rollback_on_error is False.
+        :raises: MembershipModificationException if we fail to remove groups from any other groups and rollback succeeds
+        :raises: MembershipModificationRollbackException if we fail to remove any groups from other groups, and then
+                 also fail when adding the groups that had been removed successfully, leaving us in a partially
+                 completed state. This may occur if the session has permission to remove members but not to add members.
+        """
         return self._something_members_to_or_from_groups(groups_to_remove, groups_to_remove_them_from,
                                                          self.find_group_by_name, stop_and_rollback_on_error,
-                                                         adding=False, controls=controls)
+                                                         adding=False, controls=controls,
+                                                         skip_validation=skip_validation)
 
     def remove_users_from_groups(self, users_to_remove: List[Union[str, ADUser]],
                                  groups_to_remove_them_from: List[Union[str, ADGroup]],
-                                 stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
+                                 stop_and_rollback_on_error: bool=True, controls: List[Control]=None,
+                                 skip_validation: bool=False):
+        """ Remove one or more users from one or more groups as members. This function attempts to be idempotent
+        and will not remove users that are not already members.
+
+        :param users_to_remove: A list of users to remove from groups. These may either be ADUsers objects or
+                                string name identifiers for users.
+        :param groups_to_remove_them_from: A list of groups to remove members from. These may either be ADGroup objects
+                                           or string name identifiers for groups.
+        :param stop_and_rollback_on_error: If true, failure to remove any of the users from any of the groups
+                                           will cause us to try and add any users that have been removed back to any
+                                           of the groups that we successfully removed members from.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: A list of groups that successfully had members removed. This will always be all the groups unless
+                  stop_and_rollback_on_error is False.
+        :raises: MembershipModificationException if we fail to remove users from any groups and rollback succeeds
+        :raises: MembershipModificationRollbackException if we fail to remove any users from groups, and then
+                 also fail when adding the users that had been removed successfully, leaving us in a partially
+                 completed state. This may occur if the session has permission to remove members but not to add members.
+        """
         return self._something_members_to_or_from_groups(users_to_remove, groups_to_remove_them_from,
                                                          self.find_user_by_name, stop_and_rollback_on_error,
-                                                         adding=False, controls=controls)
+                                                         adding=False, controls=controls,
+                                                         skip_validation=skip_validation)
 
     def remove_computers_from_groups(self, computers_to_remove: List[Union[str, ADComputer]],
                                      groups_to_remove_them_from: List[Union[str, ADGroup]],
-                                     stop_and_rollback_on_error: bool=True, controls: List[Control]=None):
+                                     stop_and_rollback_on_error: bool=True, controls: List[Control]=None,
+                                     skip_validation: bool=False):
+        """ Remove one or more computers from one or more groups as members. This function attempts to be idempotent
+        and will not remove computers that are not already members.
+
+        :param computers_to_remove: A list of computers to remove from groups. These may either be ADComputer objects or
+                                    string name identifiers for computers.
+        :param groups_to_remove_them_from: A list of groups to remove members from. These may either be ADGroup objects
+                                           or string name identifiers for groups.
+        :param stop_and_rollback_on_error: If true, failure to remove any of the computers from any of the groups
+                                           will cause us to try and add any computers that have been removed back to any
+                                           of the groups that we successfully removed members from.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: A list of groups that successfully had members removed. This will always be all the groups unless
+                  stop_and_rollback_on_error is False.
+        :raises: MembershipModificationException if we fail to remove computers from any groups and rollback succeeds
+        :raises: MembershipModificationRollbackException if we fail to remove any computers from groups, and then
+                 also fail when adding the computers that had been removed successfully, leaving us in a partially
+                 completed state. This may occur if the session has permission to remove members but not to add members.
+        """
         return self._something_members_to_or_from_groups(computers_to_remove, groups_to_remove_them_from,
                                                          self.find_computer_by_name, stop_and_rollback_on_error,
-                                                         adding=False, controls=controls)
+                                                         adding=False, controls=controls,
+                                                         skip_validation=skip_validation)
 
     # Functions for managing permissions within the domain
 
-    def find_security_descriptor_for_group(self, group: Union[str, ADGroup], include_sacl: bool=False):
+    def find_security_descriptor_for_group(self, group: Union[str, ADGroup], include_sacl: bool=False,
+                                           skip_validation: bool=False):
         """ Given a group, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -1583,14 +1785,20 @@ class ADSession:
                              Discretionary ACL and owner information when reading the security descriptor. This is
                              more privileged than just getting the Discretionary ACL and owner information.
                              Defaults to False.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :raises: ObjectNotFoundException if the group cannot be found.
         :raises: InvalidLdapParameterException if the group specified is not a string or an ADGroup object
         :raises: SecurityDescriptorDecodeException if we fail to decode the security descriptor.
         """
-        group = self._validate_group_and_get_group_obj(group)
-        return self.find_security_descriptor_for_object(group, include_sacl=include_sacl)
+        group = self._validate_group_and_get_group_obj(group, skip_validation=skip_validation)
+        return self.find_security_descriptor_for_object(group, include_sacl=include_sacl,
+                                                        skip_validation=skip_validation)
 
-    def find_security_descriptor_for_user(self, user: Union[str, ADUser], include_sacl: bool=False):
+    def find_security_descriptor_for_user(self, user: Union[str, ADUser], include_sacl: bool=False,
+                                          skip_validation: bool=False):
         """ Given a user, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -1600,14 +1808,20 @@ class ADSession:
                              Discretionary ACL and owner information when reading the security descriptor. This is
                              more privileged than just getting the Discretionary ACL and owner information.
                              Defaults to False.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :raises: ObjectNotFoundException if the user cannot be found.
         :raises: InvalidLdapParameterException if the user specified is not a string or an ADUser object
         :raises: SecurityDescriptorDecodeException if we fail to decode the security descriptor.
         """
-        user = self._validate_user_and_get_user_obj(user)
-        return self.find_security_descriptor_for_object(user, include_sacl=include_sacl)
+        user = self._validate_user_and_get_user_obj(user, skip_validation=skip_validation)
+        return self.find_security_descriptor_for_object(user, include_sacl=include_sacl,
+                                                        skip_validation=skip_validation)
 
-    def find_security_descriptor_for_computer(self, computer: Union[str, ADComputer], include_sacl: bool=False):
+    def find_security_descriptor_for_computer(self, computer: Union[str, ADComputer], include_sacl: bool=False,
+                                              skip_validation: bool=False):
         """ Given a computer, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -1617,14 +1831,20 @@ class ADSession:
                              Discretionary ACL and owner information when reading the security descriptor. This is
                              more privileged than just getting the Discretionary ACL and owner information.
                              Defaults to False.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :raises: ObjectNotFoundException if the computer cannot be found.
         :raises: InvalidLdapParameterException if the computer specified is not a string or an ADComputer object
         :raises: SecurityDescriptorDecodeException if we fail to decode the security descriptor.
         """
-        computer = self._validate_computer_and_get_computer_obj(computer)
-        return self.find_security_descriptor_for_object(computer, include_sacl=include_sacl)
+        computer = self._validate_computer_and_get_computer_obj(computer, skip_validation=skip_validation)
+        return self.find_security_descriptor_for_object(computer, include_sacl=include_sacl,
+                                                        skip_validation=skip_validation)
 
-    def find_security_descriptor_for_object(self, ad_object: Union[str, ADObject], include_sacl: bool=False):
+    def find_security_descriptor_for_object(self, ad_object: Union[str, ADObject], include_sacl: bool=False,
+                                            skip_validation: bool=False):
         """ Given an object, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -1634,11 +1854,15 @@ class ADSession:
                              Discretionary ACL and owner information when reading the security descriptor. This is
                              more privileged than just getting the Discretionary ACL and owner information.
                              Defaults to False.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :raises: ObjectNotFoundException if the object cannot be found.
         :raises: InvalidLdapParameterException if the ad_object specified is not a string DN or an ADObject object
         :raises: SecurityDescriptorDecodeException if we fail to decode the security descriptor.
         """
-        ad_object = self._validate_obj_and_get_ad_obj(ad_object)
+        ad_object = self._validate_obj_and_get_ad_obj(ad_object, skip_validation=skip_validation)
         dn_to_search = ad_object.distinguished_name
 
         attrs = [ldap_constants.AD_ATTRIBUTE_SECURITY_DESCRIPTOR]
@@ -1660,7 +1884,7 @@ class ADSession:
         return security_descriptor
 
     def set_object_security_descriptor(self, ad_object: Union[str, ADObject], new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                       raise_exception_on_failure: bool=True):
+                                       raise_exception_on_failure: bool=True, skip_validation: bool=False):
         """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
         object in AD, change its permission ACEs, etc.
 
@@ -1668,12 +1892,16 @@ class ADSession:
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A boolean indicating success.
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        ad_object = self._validate_obj_and_get_ad_obj(ad_object)
+        ad_object = self._validate_obj_and_get_ad_obj(ad_object, skip_validation=skip_validation)
         dn_to_modify = ad_object.distinguished_name
 
         new_sec_descriptor_bytes = new_sec_descriptor.get_data(force_recompute=True)
@@ -1691,7 +1919,7 @@ class ADSession:
         return success
 
     def set_group_security_descriptor(self, group: Union[str, ADGroup], new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                      raise_exception_on_failure: bool=True):
+                                      raise_exception_on_failure: bool=True, skip_validation: bool=False):
         """ Set the security descriptor on an Active Directory group. This can be used to change the owner of an
         group in AD, change its permission ACEs, etc.
 
@@ -1699,17 +1927,22 @@ class ADSession:
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A boolean indicating success.
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        group = self._validate_group_and_get_group_obj(group)
+        group = self._validate_group_and_get_group_obj(group, skip_validation=skip_validation)
         return self.set_object_security_descriptor(group, new_sec_descriptor,
-                                                   raise_exception_on_failure=raise_exception_on_failure)
+                                                   raise_exception_on_failure=raise_exception_on_failure,
+                                                   skip_validation=skip_validation)
 
     def set_user_security_descriptor(self, user: Union[str, ADUser], new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                     raise_exception_on_failure: bool=True):
+                                     raise_exception_on_failure: bool=True, skip_validation: bool=False):
         """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
         user in AD, change its permission ACEs, etc.
 
@@ -1717,19 +1950,25 @@ class ADSession:
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A boolean indicating success.
         :raises: InvalidLdapParameterException if user is not a string or ADUser object
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        user = self._validate_user_and_get_user_obj(user)
+        user = self._validate_user_and_get_user_obj(user, skip_validation=skip_validation)
         return self.set_object_security_descriptor(user, new_sec_descriptor,
-                                                   raise_exception_on_failure=raise_exception_on_failure)
+                                                   raise_exception_on_failure=raise_exception_on_failure,
+                                                   skip_validation=skip_validation)
 
     def set_computer_security_descriptor(self, computer: Union[str, ADComputer],
                                          new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                         raise_exception_on_failure: bool=True):
+                                         raise_exception_on_failure: bool=True,
+                                         skip_validation: bool=False):
         """ Set the security descriptor on an Active Directory computer. This can be used to change the owner of a
         computer in AD, change its permission ACEs, etc.
 
@@ -1737,15 +1976,20 @@ class ADSession:
         :param new_sec_descriptor: The security descriptor to set on the object.
         :param raise_exception_on_failure: If true, raise an exception when modifying the object fails instead of
                                            returning False.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A boolean indicating success.
         :raises: InvalidLdapParameterException if computer is not a string or ADComputer object
         :raises: ObjectNotFoundException if a string DN is specified and it cannot be found
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        computer = self._validate_computer_and_get_computer_obj(computer)
+        computer = self._validate_computer_and_get_computer_obj(computer, skip_validation=skip_validation)
         return self.set_object_security_descriptor(computer, new_sec_descriptor,
-                                                   raise_exception_on_failure=raise_exception_on_failure)
+                                                   raise_exception_on_failure=raise_exception_on_failure,
+                                                   skip_validation=skip_validation)
 
     def add_permission_to_object_security_descriptor(self, ad_object_to_modify: Union[str, ADObject],
                                                      sids_to_grant_permissions_to: List[Union[str, sd_utils.ObjectSid, security_constants.WellKnownSID]],
@@ -1753,7 +1997,8 @@ class ADSession:
                                                      rights_guids_to_add: List[Union[ADRightsGuid, str]]=None,
                                                      read_property_guids_to_add: List[str]=None,
                                                      write_property_guids_to_add: List[str]=None,
-                                                     raise_exception_on_failure: bool=True):
+                                                     raise_exception_on_failure: bool=True,
+                                                     skip_validation: bool=False):
         """ Add specified permissions to the security descriptor on an object for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the object, via adding access masks or rights guids respectively. It can also give
@@ -1783,6 +2028,10 @@ class ADSession:
                                             SIDs will be granted the right to write. These must be strings.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A boolean indicating if we succeeded in updating the security descriptor.
         :raises: InvalidLdapParameterException if any inputs are the wrong type.
         :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
@@ -1814,8 +2063,8 @@ class ADSession:
 
         # make sure we have an AD object early, so that our next calls for the lookup for the current SD and for setting
         # the SD are more efficient
-        ad_object_to_modify = self._validate_obj_and_get_ad_obj(ad_object_to_modify)
-        current_sd = self.find_security_descriptor_for_object(ad_object_to_modify)
+        ad_object_to_modify = self._validate_obj_and_get_ad_obj(ad_object_to_modify, skip_validation=skip_validation)
+        current_sd = self.find_security_descriptor_for_object(ad_object_to_modify, skip_validation=skip_validation)
 
         for sid_string in sid_strings:
             current_sd = sd_utils.add_permissions_to_security_descriptor(current_sd, sid_string,
@@ -1824,7 +2073,8 @@ class ADSession:
                                                                          read_property_guids=read_property_guids_to_add,
                                                                          write_property_guids=write_property_guids_to_add)
         return self.set_object_security_descriptor(ad_object_to_modify, current_sd,
-                                                   raise_exception_on_failure=raise_exception_on_failure)
+                                                   raise_exception_on_failure=raise_exception_on_failure,
+                                                   skip_validation=skip_validation)
 
     def add_permission_to_group_security_descriptor(self, group,
                                                     sids_to_grant_permissions_to: List[Union[str, sd_utils.ObjectSid, security_constants.WellKnownSID]],
@@ -1832,7 +2082,8 @@ class ADSession:
                                                     rights_guids_to_add: List[Union[ADRightsGuid, str]]=None,
                                                     read_property_guids_to_add: List[str]=None,
                                                     write_property_guids_to_add: List[str]=None,
-                                                    raise_exception_on_failure: bool=True):
+                                                    raise_exception_on_failure: bool=True,
+                                                    skip_validation: bool=False):
         """ Add specified permissions to the security descriptor on a group for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the group, via adding access masks or rights guids respectively. It can also give
@@ -1862,17 +2113,22 @@ class ADSession:
                                             SIDs will be granted the right to write. These must be strings.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A boolean indicating if we succeeded in updating the security descriptor.
         :raises: InvalidLdapParameterException if any inputs are the wrong type.
         :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        group = self._validate_group_and_get_group_obj(group)
+        group = self._validate_group_and_get_group_obj(group, skip_validation=skip_validation)
         return self.add_permission_to_object_security_descriptor(group, sids_to_grant_permissions_to,
                                                                  access_masks_to_add, rights_guids_to_add,
                                                                  read_property_guids_to_add, write_property_guids_to_add,
-                                                                 raise_exception_on_failure=raise_exception_on_failure)
+                                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                                 skip_validation=skip_validation)
 
     def add_permission_to_user_security_descriptor(self, user: Union[str, ADUser],
                                                    sids_to_grant_permissions_to: List[Union[str, sd_utils.ObjectSid, security_constants.WellKnownSID]],
@@ -1880,7 +2136,8 @@ class ADSession:
                                                    rights_guids_to_add: List[Union[ADRightsGuid, str]]=None,
                                                    read_property_guids_to_add: List[str]=None,
                                                    write_property_guids_to_add: List[str]=None,
-                                                   raise_exception_on_failure: bool=True):
+                                                   raise_exception_on_failure: bool=True,
+                                                   skip_validation: bool=False):
         """ Add specified permissions to the security descriptor on a user for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the user, via adding access masks or rights guids respectively. It can also give
@@ -1910,17 +2167,22 @@ class ADSession:
                                             SIDs will be granted the right to write. These must be strings.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A boolean indicating if we succeeded in updating the security descriptor.
         :raises: InvalidLdapParameterException if any inputs are the wrong type.
         :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        user = self._validate_user_and_get_user_obj(user)
+        user = self._validate_user_and_get_user_obj(user, skip_validation=skip_validation)
         return self.add_permission_to_object_security_descriptor(user, sids_to_grant_permissions_to,
                                                                  access_masks_to_add, rights_guids_to_add,
                                                                  read_property_guids_to_add, write_property_guids_to_add,
-                                                                 raise_exception_on_failure=raise_exception_on_failure)
+                                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                                 skip_validation=skip_validation)
 
     def add_permission_to_computer_security_descriptor(self, computer: Union[str, ADComputer],
                                                        sids_to_grant_permissions_to: List[Union[str, sd_utils.ObjectSid, security_constants.WellKnownSID]],
@@ -1928,7 +2190,8 @@ class ADSession:
                                                        rights_guids_to_add: List[Union[ADRightsGuid, str]]=None,
                                                        read_property_guids_to_add: List[str]=None,
                                                        write_property_guids_to_add: List[str]=None,
-                                                       raise_exception_on_failure: bool=True):
+                                                       raise_exception_on_failure: bool=True,
+                                                       skip_validation: bool=False):
         """ Add specified permissions to the security descriptor on a computer for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the computer, via adding access masks or rights guids respectively. It can also give
@@ -1958,22 +2221,27 @@ class ADSession:
                                             SIDs will be granted the right to write. These must be strings.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: A boolean indicating if we succeeded in updating the security descriptor.
         :raises: InvalidLdapParameterException if any inputs are the wrong type.
         :raises: ObjectNotFoundException if the a string distinguished name is specified and cannot be found.
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
         """
-        computer = self._validate_computer_and_get_computer_obj(computer)
+        computer = self._validate_computer_and_get_computer_obj(computer, skip_validation=skip_validation)
         return self.add_permission_to_object_security_descriptor(computer, sids_to_grant_permissions_to,
                                                                  access_masks_to_add, rights_guids_to_add,
                                                                  read_property_guids_to_add, write_property_guids_to_add,
-                                                                 raise_exception_on_failure=raise_exception_on_failure)
+                                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                                 skip_validation=skip_validation)
 
     # Various account management functionalities
 
     def change_password_for_account(self, account: Union[str, ADUser, ADComputer], new_password: str,
-                                    current_password: str):
+                                    current_password: str, skip_validation: bool=False):
         """ Change a password for a user (includes computers) given the new desired password and old desired password.
         When a password is changed, the old password is provided along with the new one, and this significantly reduces
         the permissions needed in order to perform the operation. By default, any user can perform CHANGE_PASSWORD for
@@ -1986,15 +2254,20 @@ class ADSession:
         :param current_password: The current password for the account.
         :param new_password: The new password for the account. Technically, if None is specified, then this behaves
                              as a RESET_PASSWORD operation.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds. If the operation fails, either an exception will be raised or False
                   will be returned depending on whether the ldap connection for this session has "raise_exceptions"
                   set to True or not.
         """
-        account = self._validate_user_and_get_user_obj(account, can_be_computer=True)
+        account = self._validate_user_and_get_user_obj(account, can_be_computer=True, skip_validation=skip_validation)
         account_dn = account.distinguished_name
         return self.ldap_connection.extend.microsoft.modify_password(account_dn, new_password, current_password)
 
-    def reset_password_for_account(self, account: Union[str, ADUser, ADComputer], new_password: str):
+    def reset_password_for_account(self, account: Union[str, ADUser, ADComputer], new_password: str,
+                                   skip_validation: bool=False):
         """ Resets a password for a user (includes computers) to a new desired password.
         To reset a password, a new password is provided to replace the current one without providing the current
         password. This is a privileged operation and maps to the RESET_PASSWORD permission in AD.
@@ -2002,11 +2275,15 @@ class ADSession:
         :param account: The account whose password is being changed. This may either be a string account name, to be
                         looked up, or an ADObject object.
         :param new_password: The new password for the account.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds. If the operation fails, either an exception will be raised or False
                   will be returned depending on whether the ldap connection for this session has "raise_exceptions"
                   set to True or not.
         """
-        return self.change_password_for_account(account, new_password, None)
+        return self.change_password_for_account(account, new_password, None, skip_validation=skip_validation)
 
     def disable_account(self, account: Union[str, ADUser, ADComputer]):
         """ Disable a user account.
@@ -2092,16 +2369,21 @@ class ADSession:
             logger.debug('Result of modifying user account control to disable %s: %s', account_dn, result)
         return success
 
-    def unlock_account(self, account: Union[str, ADComputer, ADUser]):
+    def unlock_account(self, account: Union[str, ADComputer, ADUser], skip_validation: bool=False):
         """ Unlock a user who's been locked out for some period of time.
         :param account: The string name of the user/computer account that has been locked out. This may either be a
                         sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
                         and the distinguished name will be extracted from it.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds. If the operation fails, either an exception will be raised or False
                   will be returned depending on whether the ldap connection for this session has "raise_exceptions"
                   set to True or not.
         """
-        account = self._validate_user_and_get_user_obj(account, can_be_computer=True)
+        account = self._validate_user_and_get_user_obj(account, can_be_computer=True,
+                                                       skip_validation=skip_validation)
         account_dn = account.distinguished_name
         return self.ldap_connection.extend.microsoft.unlock_account(account_dn)
 
@@ -2109,7 +2391,7 @@ class ADSession:
 
     def _do_something_to_attribute_for_object(self, ad_object: Union[str, ADObject], attribute_to_value_map: dict,
                                               controls: List[Control], raise_exception_on_failure: bool,
-                                              action: str, action_desc_for_errors: str):
+                                              action: str, action_desc_for_errors: str, skip_validation: bool=False):
         """ Our helper function for either atomically appending to, or overwriting attributes on an object.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2123,6 +2405,10 @@ class ADSession:
                                            fails.
         :param action: The action to take - either MODIFY_ADD or MODIFY_REPLACE
         :param action_desc_for_errors: A description of what we're doing for use in errors.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2130,7 +2416,7 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        ad_object = self._validate_obj_and_get_ad_obj(ad_object)
+        ad_object = self._validate_obj_and_get_ad_obj(ad_object, skip_validation=skip_validation)
         object_dn = ad_object.distinguished_name
 
         # format all of the changes provided by users so they're ready to serialize for an ldap message,
@@ -2158,7 +2444,8 @@ class ADSession:
         return success
 
     def atomic_append_to_attribute_for_object(self, ad_object: Union[str, ADObject], attribute: str, value,
-                                              controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                              controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                              skip_validation: bool=False):
         """ Atomically append a value to an attribute for an object in the domain.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2170,6 +2457,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2179,10 +2470,12 @@ class ADSession:
         """
         attr_map = {attribute: value}
         return self._do_something_to_attribute_for_object(ad_object, attr_map, controls, raise_exception_on_failure,
-                                                          MODIFY_ADD, 'appending a value for an attribute')
+                                                          MODIFY_ADD, 'appending a value for an attribute',
+                                                          skip_validation=skip_validation)
 
     def atomic_append_to_attributes_for_object(self, ad_object: Union[str, ADObject], attribute_to_value_map: dict,
-                                               controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                               controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                               skip_validation: bool=False):
         """ Atomically append values to multiple attributes for an object in the domain.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2194,6 +2487,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2203,10 +2500,12 @@ class ADSession:
         """
         return self._do_something_to_attribute_for_object(ad_object, attribute_to_value_map, controls,
                                                           raise_exception_on_failure, MODIFY_ADD,
-                                                          'appending values for multiple attributes')
+                                                          'appending values for multiple attributes',
+                                                          skip_validation=skip_validation)
 
     def overwrite_attribute_for_object(self, ad_object: Union[str, ADObject], attribute: str, value,
-                                       controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                       controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                       skip_validation: bool=False):
         """ Atomically overwrite the value of an attribute for an object in the domain.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2217,6 +2516,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2227,10 +2530,12 @@ class ADSession:
         attr_map = {attribute: value}
         return self._do_something_to_attribute_for_object(ad_object, attr_map, controls,
                                                           raise_exception_on_failure, MODIFY_REPLACE,
-                                                          'overwriting a value for an attributes')
+                                                          'overwriting a value for an attributes',
+                                                          skip_validation=skip_validation)
 
     def overwrite_attributes_for_object(self, ad_object: Union[str, ADObject], attribute_to_value_map: dict,
-                                        controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                        controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                        skip_validation: bool=False):
         """ Atomically overwrite values of multiple attributes for an object in the domain.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2242,6 +2547,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2251,10 +2560,12 @@ class ADSession:
         """
         return self._do_something_to_attribute_for_object(ad_object, attribute_to_value_map, controls,
                                                           raise_exception_on_failure, MODIFY_REPLACE,
-                                                          'overwriting values for multiple attributes')
+                                                          'overwriting values for multiple attributes',
+                                                          skip_validation=skip_validation)
 
     def atomic_append_to_attribute_for_group(self, group: Union[str, ADGroup], attribute: str, value,
-                                             controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                             controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                             skip_validation: bool=False):
         """ Atomically append a value to an attribute for a group in the domain.
 
         :param group: Either an ADGroup object or string name referencing the group to be modified.
@@ -2266,6 +2577,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2273,12 +2588,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        group = self._validate_group_and_get_group_obj(group)
+        group = self._validate_group_and_get_group_obj(group, skip_validation=skip_validation)
         return self.atomic_append_to_attribute_for_object(group, attribute, value, controls,
                                                           raise_exception_on_failure)
 
     def atomic_append_to_attributes_for_group(self, group: Union[str, ADGroup], attribute_to_value_map: dict,
-                                              controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                              controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                              skip_validation: bool=False):
         """ Atomically append values to multiple attributes for a group in the domain.
 
         :param group: Either an ADGroup object or string name referencing the group to be modified.
@@ -2290,6 +2606,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2299,10 +2619,11 @@ class ADSession:
         """
         group = self._validate_group_and_get_group_obj(group)
         return self.atomic_append_to_attributes_for_object(group, attribute_to_value_map, controls,
-                                                           raise_exception_on_failure)
+                                                           raise_exception_on_failure, skip_validation=skip_validation)
 
     def overwrite_attribute_for_group(self, group: Union[str, ADGroup], attribute: str, value,
-                                      controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                      controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                      skip_validation: bool=False):
         """ Atomically overwrite the value of an attribute for a group in the domain.
 
         :param group: Either an ADUser object or string name referencing the group to be modified.
@@ -2313,6 +2634,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2320,12 +2645,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        group = self._validate_group_and_get_group_obj(group)
+        group = self._validate_group_and_get_group_obj(group, skip_validation=skip_validation)
         return self.overwrite_attribute_for_object(group, attribute, value, controls,
-                                                   raise_exception_on_failure)
+                                                   raise_exception_on_failure, skip_validation=skip_validation)
 
     def overwrite_attributes_for_group(self, group: Union[str, ADGroup], attribute_to_value_map: dict,
-                                       controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                       controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                       skip_validation: bool=False):
         """ Atomically overwrite values of multiple attributes for a group in the domain.
 
         :param group: Either an ADGroup object or string name referencing the group to have attributes overwritten.
@@ -2337,6 +2663,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a name is specified and cannot be found
@@ -2344,12 +2674,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        group = self._validate_group_and_get_group_obj(group)
+        group = self._validate_group_and_get_group_obj(group, skip_validation=skip_validation)
         return self.overwrite_attributes_for_object(group, attribute_to_value_map, controls,
-                                                    raise_exception_on_failure)
+                                                    raise_exception_on_failure, skip_validation=skip_validation)
 
     def atomic_append_to_attribute_for_user(self, user: Union[str, ADUser], attribute: str, value,
-                                            controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                            controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                            skip_validation: bool=False):
         """ Atomically append a value to an attribute for a user in the domain.
 
         :param user: Either an ADUser object or string name referencing the user to be modified.
@@ -2361,6 +2692,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2368,12 +2703,14 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        user = self._validate_user_and_get_user_obj(user)
+        user = self._validate_user_and_get_user_obj(user, skip_validation=skip_validation)
         return self.atomic_append_to_attribute_for_object(user, attribute, value, controls,
-                                                          raise_exception_on_failure)
+                                                          raise_exception_on_failure,
+                                                          skip_validation=skip_validation)
 
     def atomic_append_to_attributes_for_user(self, user: Union[str, ADUser], attribute_to_value_map: dict,
-                                             controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                             controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                             skip_validation: bool=False):
         """ Atomically append values to multiple attributes for a user in the domain.
 
         :param user: Either an ADUser object or string name referencing the user to be modified.
@@ -2385,6 +2722,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2392,12 +2733,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        user = self._validate_user_and_get_user_obj(user)
+        user = self._validate_user_and_get_user_obj(user, skip_validation=skip_validation)
         return self.atomic_append_to_attributes_for_object(user, attribute_to_value_map, controls,
-                                                           raise_exception_on_failure)
+                                                           raise_exception_on_failure, skip_validation=skip_validation)
 
     def overwrite_attribute_for_user(self, user: Union[str, ADUser], attribute: str, value,
-                                     controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                     controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                     skip_validation: bool=False):
         """ Atomically overwrite the value of an attribute for a user in the domain.
 
         :param user: Either an ADUser object or string name referencing the user to be modified.
@@ -2408,6 +2750,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2415,12 +2761,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        user = self._validate_user_and_get_user_obj(user)
+        user = self._validate_user_and_get_user_obj(user, skip_validation=skip_validation)
         return self.overwrite_attribute_for_object(user, attribute, value, controls,
-                                                   raise_exception_on_failure)
+                                                   raise_exception_on_failure, skip_validation=skip_validation)
 
     def overwrite_attributes_for_user(self, user: Union[str, ADUser], attribute_to_value_map: dict,
-                                      controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                      controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                      skip_validation: bool=False):
         """ Atomically overwrite values of multiple attributes for a user in the domain.
 
         :param user: Either an ADUser object or string name referencing the user to have attributes overwritten.
@@ -2432,6 +2779,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a name is specified and cannot be found
@@ -2439,12 +2790,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        user = self._validate_user_and_get_user_obj(user)
+        user = self._validate_user_and_get_user_obj(user, skip_validation=skip_validation)
         return self.overwrite_attributes_for_object(user, attribute_to_value_map, controls,
-                                                    raise_exception_on_failure)
+                                                    raise_exception_on_failure, skip_validation=skip_validation)
 
     def atomic_append_to_attribute_for_computer(self, computer: Union[str, ADComputer], attribute: str, value,
-                                                controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                                controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                                skip_validation: bool=False):
         """ Atomically append a value to an attribute for a computer in the domain.
 
         :param computer: Either an ADComputer object or string name referencing the computer to be modified.
@@ -2456,6 +2808,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2463,12 +2819,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        computer = self._validate_computer_and_get_computer_obj(computer)
+        computer = self._validate_computer_and_get_computer_obj(computer, skip_validation=skip_validation)
         return self.atomic_append_to_attribute_for_object(computer, attribute, value, controls,
-                                                          raise_exception_on_failure)
+                                                          raise_exception_on_failure, skip_validation=skip_validation)
 
     def atomic_append_to_attributes_for_computer(self, computer: Union[str, ADComputer], attribute_to_value_map: dict,
-                                                 controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                                 controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                                 skip_validation: bool=False):
         """ Atomically append values to multiple attributes for a computer in the domain.
 
         :param computer: Either an ADComputer object or string name referencing the computer to be modified.
@@ -2480,6 +2837,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2487,12 +2848,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        computer = self._validate_computer_and_get_computer_obj(computer)
+        computer = self._validate_computer_and_get_computer_obj(computer, skip_validation=skip_validation)
         return self.atomic_append_to_attributes_for_object(computer, attribute_to_value_map, controls,
-                                                           raise_exception_on_failure)
+                                                           raise_exception_on_failure, skip_validation=skip_validation)
 
     def overwrite_attribute_for_computer(self, computer: Union[str, ADComputer], attribute: str, value,
-                                         controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                         controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                         skip_validation: bool=False):
         """ Atomically overwrite the value of an attribute for a computer in the domain.
 
         :param computer: Either an ADComputer object or string name referencing the computer to be modified.
@@ -2503,6 +2865,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -2510,12 +2876,13 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        computer = self._validate_computer_and_get_computer_obj(computer)
+        computer = self._validate_computer_and_get_computer_obj(computer, skip_validation=skip_validation)
         return self.overwrite_attribute_for_object(computer, attribute, value, controls,
-                                                   raise_exception_on_failure)
+                                                   raise_exception_on_failure, skip_validation=skip_validation)
 
     def overwrite_attributes_for_computer(self, computer: Union[str, ADComputer], attribute_to_value_map: dict,
-                                          controls: List[Control]=None, raise_exception_on_failure: bool=True):
+                                          controls: List[Control]=None, raise_exception_on_failure: bool=True,
+                                          skip_validation: bool=False):
         """ Atomically overwrite values of multiple attributes for a computer in the domain.
 
         :param computer: Either an ADComputer object or string name referencing the computer to have attributes
@@ -2528,6 +2895,10 @@ class ADSession:
         :param controls: LDAP controls to use during the modification operation.
         :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
                                            fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a name is specified and cannot be found
@@ -2535,9 +2906,9 @@ class ADSession:
         :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
                  issues are seen such as determining that a value is malformed based on the server schema.
         """
-        computer = self._validate_computer_and_get_computer_obj(computer)
+        computer = self._validate_computer_and_get_computer_obj(computer, skip_validation=skip_validation)
         return self.overwrite_attributes_for_object(computer, attribute_to_value_map, controls,
-                                                    raise_exception_on_failure)
+                                                    raise_exception_on_failure, skip_validation=skip_validation)
 
     # generic utilities for figuring out information about the current user with respect to the domain
     # and managing trusts
@@ -2605,21 +2976,25 @@ class ADSession:
 
     # internal validation utils
 
-    def _validate_group_and_get_group_obj(self, group: Union[str, ADGroup]):
+    def _validate_group_and_get_group_obj(self, group: Union[str, ADGroup], skip_validation=False):
         if isinstance(group, str):
+            if skip_validation:
+                return ADGroup(group, {}, self.domain)
             # do one lookup for existence for better errors
             original = group
             group = self.find_group_by_name(group)
             if group is None:
                 raise ObjectNotFoundException('No group could be found with the Group object class and name {}'
                                               .format(original))
-        elif not isinstance(group, ADUser):
+        elif not isinstance(group, ADGroup):
             raise InvalidLdapParameterException('The user specified must be an ADGroup object or a string group name.')
         return group
 
-    def _validate_obj_and_get_ad_obj(self, ad_object: Union[str, ADObject]):
+    def _validate_obj_and_get_ad_obj(self, ad_object: Union[str, ADObject], skip_validation=False):
         # get distinguished name and confirm object existence as needed
         if isinstance(ad_object, str):
+            if skip_validation:
+                return ADObject(ad_object, {}, self.domain)
             object_dn = ad_object
             if not ldap_utils.is_dn(ad_object):
                 raise InvalidLdapParameterException('The object specified must be an ADObject object or a string '
@@ -2635,8 +3010,11 @@ class ADSession:
                                                 'distinguished name.')
         return ad_object
 
-    def _validate_user_and_get_user_obj(self, user: Union[str, ADUser], can_be_computer=False):  # computers are users
+    def _validate_user_and_get_user_obj(self, user: Union[str, ADUser], can_be_computer=False,  # computers are users
+                                        skip_validation=False):
         if isinstance(user, str):
+            if skip_validation:
+                return ADUser(user, {}, self.domain)
             # do one lookup for existence for better errors
             original = user
             # computers are users so this will actually work whether can_be_computer is true or false
@@ -2650,15 +3028,17 @@ class ADSession:
             raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
         return user
 
-    def _validate_computer_and_get_computer_obj(self, computer: Union[str, ADComputer]):
+    def _validate_computer_and_get_computer_obj(self, computer: Union[str, ADComputer], skip_validation=False):
         if isinstance(computer, str):
+            if skip_validation:
+                return ADComputer(computer, {}, self.domain)
             # do one lookup for existence for better errors
             original = computer
             computer = self.find_computer_by_name(computer)
             if computer is None:
                 raise ObjectNotFoundException('No computer could be found with the Computer object class and name {}'
                                               .format(original))
-        elif not isinstance(computer, ADUser):
+        elif not isinstance(computer, ADComputer):
             raise InvalidLdapParameterException('The computer specified must be an ADComputer object or a string '
                                                 'computer name.')
         return computer
