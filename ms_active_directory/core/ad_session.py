@@ -1590,6 +1590,103 @@ class ADSession:
         return self.find_groups_for_entities(computers, attributes_to_lookup, self.find_computer_by_name, controls,
                                              skip_validation=skip_validation)
 
+    def find_members_of_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str]=None,
+                              controls: List[Control]=None, skip_validation: bool=False):
+        """ Find the members of a group in the domain, along with attributes of the members.
+
+        :param group: Either a string name of a group or ADGroup to look up the members of.
+        :param attributes_to_lookup: Attributes to look up about the members of each group.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all members exist and do not raise an error if we fail to look one up.
+                                Instead, a placeholder object will be used for members that could not be found.
+                                Defaults to False.
+        :return: A list of objects representing the group's members.
+                 The objects may be of type ADUser, ADComputer, ADGroup, etc. - this function attempts to cast all
+                 member objects to the most accurate object type representing them. ADObject will be used for members
+                 that do not match any of the more specific object types in the library
+                 (e.g. foreign security principals).
+        :raises: InvalidLdapParameterException if the group is not a string or ADGroup
+        :raises: ObjectNotFoundException if the group cannot be found.
+        :raises: DomainSearchException if skip_validation is False and any group members cannot be found.
+        """
+        single_map = self.find_members_of_groups([group], attributes_to_lookup, controls,
+                                                 skip_validation=skip_validation)
+        return single_map[group]
+
+    def find_members_of_groups(self, groups: List[Union[str, ADGroup]], attributes_to_lookup: List[str]=None,
+                               controls: List[Control]=None, skip_validation: bool=False):
+        """ Find the members of one or more groups in the domain, along with attributes of the members.
+
+        :param groups: A list of either strings or ADGroups to look up the members of.
+        :param attributes_to_lookup: Attributes to look up about the members of each group.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all members exist and do not raise an error if we fail to look one up.
+                                Instead, a placeholder object will be used for members that could not be found.
+                                Defaults to False.
+        :return: A dictionary mapping groups from the input list to lists of objects representing their members.
+                 The objects may be of type ADUser, ADComputer, ADGroup, etc. - this function attempts to cast all
+                 member objects to the most accurate object type representing them. ADObject will be used for members
+                 that do not match any of the more specific object types in the library
+                 (e.g. foreign security principals).
+        :raises: InvalidLdapParameterException if any groups are not strings or ADGroups
+        :raises: ObjectNotFoundException if any groups cannot be found.
+        :raises: DomainSearchException if skip_validation is False and any group members cannot be found.
+        """
+        all_member_dns_set = set()
+        group_to_member_dn_map = {}
+        for group in groups:
+            informed_group_object = None
+            if isinstance(group, ADGroup):
+                # if our group is an ADGroup, we can do the lookup by DN which is most efficient
+                informed_group_object = self.find_group_by_distinguished_name(group.distinguished_name,
+                                                                              [ldap_constants.AD_ATTRIBUTE_MEMBER],
+                                                                              controls=controls)
+            elif isinstance(group, str):
+                informed_group_object = self.find_group_by_name(group, [ldap_constants.AD_ATTRIBUTE_MEMBER],
+                                                                controls=controls)
+            else:
+                raise InvalidLdapParameterException('All groups must be either strings or ADGroup objects. {} is not.'
+                                                    .format(group))
+            if informed_group_object is None:
+                raise ObjectNotFoundException('No group could be found in the domain with the Group object class using '
+                                              'group {}'.format(group))
+            # add our members to our set and update our map
+            member_dns = informed_group_object.get(ldap_constants.AD_ATTRIBUTE_MEMBER)
+            all_member_dns_set.update(member_dns)
+            group_to_member_dn_map[group] = member_dns
+
+        logger.debug('Found %s unique members across %s groups', len(all_member_dns_set), len(groups))
+        # now we need to look up all of the members.
+        member_dn_to_objects = {}
+        for member_dn in all_member_dns_set:
+            ad_obj = self.find_object_by_distinguished_name(member_dn, attributes_to_lookup, controls=controls)
+            if ad_obj is None:
+                if skip_validation:
+                    # use a placeholder object with just the dn
+                    ad_obj = ADObject(member_dn, {}, self.domain)
+                else:
+                    raise DomainSearchException('An object with distinguished name {} was listed as a member of a '
+                                                'group but information about it could not be found when searching the '
+                                                'domain. This may indicate that the object was deleted in parallel '
+                                                'with this search being performed, or an issue with the permissions '
+                                                'of this session. If you believe it was a race with the domain '
+                                                'changing, please retry this operation. Otherwise, please examine the '
+                                                'permissions of the session.'.format(member_dn))
+            member_dn_to_objects[member_dn] = ad_obj
+
+        group_to_members_map = {}
+        for group in groups:
+            group_member_dns = group_to_member_dn_map[group]
+            group_to_members_map[group] = []
+            for dn in group_member_dns:
+                member_obj = member_dn_to_objects[dn]
+                group_to_members_map[group].append(member_obj)
+        return group_to_members_map
+
     # FUNCTIONS FOR MODIFYING MEMBERSHIPS
 
     def _something_members_to_or_from_groups(self, members: List[Union[str, ADObject]],

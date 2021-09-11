@@ -80,7 +80,6 @@ class ADObject:
         obj_cls = obj_cls.lower()
         return obj_cls in [o_cls.lower() for o_cls in self.object_classes]
 
-
     def __repr__(self):
         attrs = self.all_attributes.__repr__() if self.all_attributes else 'None'
         domain = self.domain.__repr__()
