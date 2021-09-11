@@ -67,9 +67,10 @@ from ms_active_directory.exceptions import (
 
 
 def add_permissions_to_security_descriptor_dacl(current_security_descriptor_bytes: bytes, sid_string: str,
-                                                access_masks: List['AccessMask']=None, privilege_guids: List[str]=None,
-                                                read_property_guids: List[str]=None,
-                                                write_property_guids: List[str]=None):
+                                                access_masks: List['AccessMask'] = None,
+                                                privilege_guids: List[str] = None,
+                                                read_property_guids: List[str] = None,
+                                                write_property_guids: List[str] = None):
     """ Given a bytestring for the current security descriptor on an Active Directory object,
     an SID to add permissions for, an optional list of access masks, and an optional list of
     privilege guids, we construct new ACE entries for every access mask and privilege guid we
@@ -90,9 +91,9 @@ def add_permissions_to_security_descriptor_dacl(current_security_descriptor_byte
 
 
 def add_permissions_to_security_descriptor(current_security_descriptor, sid_string: str,
-                                           access_masks: List['AccessMask']=None, privilege_guids: List[str]=None,
-                                           read_property_guids: List[str]=None,
-                                           write_property_guids: List[str]=None):
+                                           access_masks: List['AccessMask'] = None, privilege_guids: List[str] = None,
+                                           read_property_guids: List[str] = None,
+                                           write_property_guids: List[str] = None):
     """ Given a security descriptor object representing the DACL bytes on an Active Directory object,
     an SID to add permissions for, an optional list of access masks, and an optional list of
     privilege guids, we construct new ACE entries for every access mask and privilege guid we
@@ -279,7 +280,7 @@ class Structure(object):
     structure = ()
     REPR_NAME = 'Structure'
 
-    def __init__(self, data: bytes=None, parent_structure: 'Structure'=None):
+    def __init__(self, data: bytes = None, parent_structure: 'Structure' = None):
         self.fields = {}
         self.raw_data = data
         self.parent_structure = parent_structure
@@ -288,7 +289,7 @@ class Structure(object):
         else:
             self.data = None
 
-    def get_data(self, force_recompute: bool=False):
+    def get_data(self, force_recompute: bool = False):
         """ If we've ever computed and packed our data before, and not changed since then, return
         that.
         Otherwise, iterate through our structure, pack each field, and return that data.
@@ -339,14 +340,14 @@ class Structure(object):
                 return field[0]
         return None
 
-    def calc_pack_size_for_field(self, field_name: str, format_spec: str=None):
+    def calc_pack_size_for_field(self, field_name: str, format_spec: str = None):
         """ Calculate the size needed to pack the value in the given field. """
         if format_spec is None:
             format_spec = self.get_field_format_spec(field_name)
 
         return self.calc_pack_or_unpack_size(format_spec, self[field_name])
 
-    def calc_pack_or_unpack_size(self, format_spec: str, data: bytes, field_name: str=None, is_unpack: bool=False):
+    def calc_pack_or_unpack_size(self, format_spec: str, data: bytes, field_name: str = None, is_unpack: bool = False):
         """ Calculate the size needed to pack or unpack the given data according to a format
         specification for how the data should be encoded.
         Optionally, the name of the field can be provided. If it is, then we'll check if it has
@@ -389,7 +390,7 @@ class Structure(object):
         # struct like specifier
         return calcsize(format_spec)
 
-    def pack_field(self, field_name: str, format_spec: str=None):
+    def pack_field(self, field_name: str, format_spec: str = None):
         """ Pack an individual field's value according to its format specification so we can get
         the bytes for the field.
         """
@@ -661,12 +662,12 @@ class ObjectSid(Structure):
         self[SUB_AUTHORITY_COUNT] = len(items) - 3
         self[SUB_AUTHORITY] = b''
         for i in range(self[SUB_AUTHORITY_COUNT]):
-            self[SUB_AUTHORITY] += pack('<L', int(items[i+3]))
+            self[SUB_AUTHORITY] += pack('<L', int(items[i + 3]))
 
     def to_canonical_string_format(self):
         ans = 'S-%d-%d' % (self[REVISION], ord(self[IDENTIFIER_AUTHORITY][VALUE][5:6]))
         for i in range(self[SUB_AUTHORITY_COUNT]):
-            ans += '-%d' % (unpack('<L', self[SUB_AUTHORITY][i*4:i*4+4])[0])
+            ans += '-%d' % (unpack('<L', self[SUB_AUTHORITY][i * 4:i * 4 + 4])[0])
         return ans
 
     def to_ldap_filter_string_format(self):
@@ -718,7 +719,7 @@ class SelfRelativeSecurityDescriptor(Structure):
         else:
             self[DACL] = b''
 
-    def get_data(self, force_recompute: bool=False):
+    def get_data(self, force_recompute: bool = False):
         headerlen = 20
         # Reconstruct the security descriptor
         # flags are currently not set automatically, so if we changed a top level flag around
@@ -757,13 +758,13 @@ class ACE(Structure):
     https://msdn.microsoft.com/en-us/library/cc230295.aspx
     """
     # Flag constants
-    CONTAINER_INHERIT_ACE       = 0x02
-    FAILED_ACCESS_ACE_FLAG      = 0x80
-    INHERIT_ONLY_ACE            = 0x08
-    INHERITED_ACE               = 0x10
-    NO_PROPAGATE_INHERIT_ACE    = 0x04
-    OBJECT_INHERIT_ACE          = 0x01
-    SUCCESSFUL_ACCESS_ACE_FLAG  = 0x40
+    CONTAINER_INHERIT_ACE = 0x02
+    FAILED_ACCESS_ACE_FLAG = 0x80
+    INHERIT_ONLY_ACE = 0x08
+    INHERITED_ACE = 0x10
+    NO_PROPAGATE_INHERIT_ACE = 0x04
+    OBJECT_INHERIT_ACE = 0x01
+    SUCCESSFUL_ACCESS_ACE_FLAG = 0x40
 
     structure = (
         #
@@ -787,7 +788,7 @@ class ACE(Structure):
         self[ACE_TYPE_NAME] = ACE_TYPE_MAP[self[ACE_TYPE]].__name__
         self[ACE_BODY] = ACE_TYPE_MAP[self[ACE_TYPE]](data=self[ACE_BODY], parent_structure=self)
 
-    def get_data(self, force_recompute: bool=False):
+    def get_data(self, force_recompute: bool = False):
         if ACE_SIZE not in self.fields:
             # include our 4 byte header size in the ACE size, in addition to the size of our body
             self[ACE_SIZE] = len(self[ACE_BODY].get_data(force_recompute=force_recompute)) + 4
@@ -813,17 +814,17 @@ class AccessMask(Structure):
     https://msdn.microsoft.com/en-us/library/cc230294.aspx
     """
     # Flag constants
-    GENERIC_READ            = 0x80000000
-    GENERIC_WRITE           = 0x04000000
-    GENERIC_EXECUTE         = 0x20000000
-    GENERIC_ALL             = 0x10000000
-    MAXIMUM_ALLOWED         = 0x02000000
-    ACCESS_SYSTEM_SECURITY  = 0x01000000
-    SYNCHRONIZE             = 0x00100000
-    WRITE_OWNER             = 0x00080000
-    WRITE_DACL              = 0x00040000
-    READ_CONTROL            = 0x00020000
-    DELETE                  = 0x00010000    # this is what can give us SELF DELETE
+    GENERIC_READ = 0x80000000
+    GENERIC_WRITE = 0x04000000
+    GENERIC_EXECUTE = 0x20000000
+    GENERIC_ALL = 0x10000000
+    MAXIMUM_ALLOWED = 0x02000000
+    ACCESS_SYSTEM_SECURITY = 0x01000000
+    SYNCHRONIZE = 0x00100000
+    WRITE_OWNER = 0x00080000
+    WRITE_DACL = 0x00040000
+    READ_CONTROL = 0x00020000
+    DELETE = 0x00010000  # this is what can give us SELF DELETE
 
     structure = (
         (MASK, '<L'),
@@ -863,18 +864,18 @@ class AccessAllowedObjectAce(Structure):
     ACE_TYPE = 0x05
 
     # Flag contstants
-    ACE_OBJECT_TYPE_PRESENT             = 0x01
-    ACE_INHERITED_OBJECT_TYPE_PRESENT   = 0x02
+    ACE_OBJECT_TYPE_PRESENT = 0x01
+    ACE_INHERITED_OBJECT_TYPE_PRESENT = 0x02
 
     # ACE type specific mask constants
     # These also appear to be valid for ACCESS_ALLOWED_ACE types, though documentation
     # for that doesn't exist.
-    ADS_RIGHT_DS_CONTROL_ACCESS         = 0x00000100
-    ADS_RIGHT_DS_CREATE_CHILD           = 0x00000001
-    ADS_RIGHT_DS_DELETE_CHILD           = 0x00000002
-    ADS_RIGHT_DS_READ_PROP              = 0x00000010
-    ADS_RIGHT_DS_WRITE_PROP             = 0x00000020
-    ADS_RIGHT_DS_SELF                   = 0x00000008
+    ADS_RIGHT_DS_CONTROL_ACCESS = 0x00000100
+    ADS_RIGHT_DS_CREATE_CHILD = 0x00000001
+    ADS_RIGHT_DS_DELETE_CHILD = 0x00000002
+    ADS_RIGHT_DS_READ_PROP = 0x00000010
+    ADS_RIGHT_DS_WRITE_PROP = 0x00000020
+    ADS_RIGHT_DS_SELF = 0x00000008
 
     structure = (
         (MASK, ':', AccessMask),
@@ -1136,7 +1137,7 @@ class ACL(Structure):
             self[DATA] = self[DATA][ace[ACE_SIZE]:]
         self[DATA] = self.aces
 
-    def get_data(self, force_recompute: bool=False):
+    def get_data(self, force_recompute: bool = False):
         self[ACE_COUNT] = len(self.aces)
         # We modify the data field to be able to use the
         # parent class parsing

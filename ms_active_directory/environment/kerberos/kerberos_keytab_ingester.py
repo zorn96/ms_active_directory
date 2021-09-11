@@ -30,7 +30,6 @@ from ms_active_directory.environment.kerberos.kerberos_constants import (
 )
 from ms_active_directory.exceptions import KeytabEncodingException
 
-
 logger = logging_utils.get_logger()
 
 
@@ -54,13 +53,13 @@ def _twos_complement(value: int, bits: int):
     """ This does twos complement so we can convert hex strings to signed integers.
     Why is this not built-in to python int?
     """
-    if value & (1 << (bits-1)):
+    if value & (1 << (bits - 1)):
         value -= 1 << bits
     return value
 
 
-def _read_bytes_as_number(keytab: str, index: int, bytes_to_read: int=1, keytab_format_version: int=1,
-                          is_signed_int: bool=False):
+def _read_bytes_as_number(keytab: str, index: int, bytes_to_read: int = 1, keytab_format_version: int = 1,
+                          is_signed_int: bool = False):
     """ Given hex-encoded keytab data, the index we're starting from, the number of
     bytes in the keytab we want to read, and the keytab format version, this function
     will read and interpret the bytes requested starting at the index. Bytes may be
@@ -86,7 +85,7 @@ def _read_bytes_as_number(keytab: str, index: int, bytes_to_read: int=1, keytab_
     if keytab_format_version == 1:
         converted_from_little_endian = []
         for i in range(0, offset, 2):
-            converted_from_little_endian.insert(0, hex_string_to_parse[i:i+2])
+            converted_from_little_endian.insert(0, hex_string_to_parse[i:i + 2])
         hex_string_to_parse = ''.join(converted_from_little_endian)
     elif keytab_format_version != 2:
         raise KeytabEncodingException('Unrecognized keytab format version {}'.format(keytab_format_version))
@@ -114,7 +113,7 @@ def _read_bytes_as_string(keytab: str, index: int, bytes_to_read: int):
 
 
 def _read_bytes_to_number_and_then_move_position(keytab: str, current_keytab_position: int, bytes_to_read: int,
-                                                 keytab_format_version: int, is_signed_int: bool=False):
+                                                 keytab_format_version: int, is_signed_int: bool = False):
     """ Read some number of bytes from the keytab starting at the given position, move our
     position in the keytab forward, and return the value read as an integer and the new position.
 
@@ -147,7 +146,8 @@ def _get_principal_component_length_and_then_read_component(keytab: str, current
 
     :returns: a tuple of component value, keytab position after reading
     """
-    component_length, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+    component_length, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                             current_keytab_position,
                                                                                              PRINCIPAL_COMPONENT_LENGTH_FIELD_SIZE_BYTES,
                                                                                              keytab_format_version)
     component, current_keytab_position = _read_bytes_to_string_and_then_move_position(keytab, current_keytab_position,
@@ -167,7 +167,7 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
         raise KeytabEncodingException('Keytabs must always start with 0x05 as the leading byte, as only Kerberos v5 '
                                       'keytabs are supported. Seen leading byte: {}'.format(start_byte))
     # one byte is 2 hex digits, so move positions equal to 2x our size in bytes
-    current_keytab_position += 2*KEYTAB_STANDARD_LEADING_BYTES_SIZE
+    current_keytab_position += 2 * KEYTAB_STANDARD_LEADING_BYTES_SIZE
 
     # we check our format version by reading bytes in the default v1 format, because that's how
     # backwards compatibility works. the thing that tells you "you're in the new format" is
@@ -180,7 +180,7 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
                                       .format(keytab_format_version))
     logger.debug('Ingesting keytab with format version %s', keytab_format_version)
     # one byte is 2 hex digits, so move positions equal to 2x our size in bytes
-    current_keytab_position += 2*KEYTAB_FORMAT_SIZE_BYTES
+    current_keytab_position += 2 * KEYTAB_FORMAT_SIZE_BYTES
 
     # this is the prefix the encodes our keytab format version. it only appears once for the entire
     # file. so if we want to split up our file into all of its individual entries, we want to prepend
@@ -197,7 +197,7 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
 
     # since our string is hex, a byte is represented by 2 characters, so we move our index forwards by twice
     # the number of bytes we read
-    current_keytab_position += 2*ENTRY_LENGTH_FIELD_SIZE_BYTES
+    current_keytab_position += 2 * ENTRY_LENGTH_FIELD_SIZE_BYTES
     # iterate through entries
     slot = 1
     while entry_length_bytes != 0:
@@ -219,21 +219,24 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
 
                 # since our string is hex, a byte is represented by 2 characters, so we move our index forwards by twice
                 # the number of bytes we read
-                current_keytab_position += 2*NUM_COMPONENTS_FIELD_SIZE_BYTES
+                current_keytab_position += 2 * NUM_COMPONENTS_FIELD_SIZE_BYTES
 
                 # counted octet string realm (prefixed with 16bit length, no null terminator)
-                realm_length, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+                realm_length, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                                     current_keytab_position,
                                                                                                      REALM_LENGTH_FIELD_SIZE_BYTES,
                                                                                                      keytab_format_version)
                 if realm_length == 0:
                     raise KeytabEncodingException('Malformed keytab file detected. A realm length of 0 is encoded to a '
                                                   'keytab.')
-                realm, current_keytab_position = _read_bytes_to_string_and_then_move_position(keytab, current_keytab_position,
+                realm, current_keytab_position = _read_bytes_to_string_and_then_move_position(keytab,
+                                                                                              current_keytab_position,
                                                                                               realm_length)
 
                 principal_components = []
                 for i in range(num_components):
-                    piece, current_keytab_position = _get_principal_component_length_and_then_read_component(keytab, current_keytab_position,
+                    piece, current_keytab_position = _get_principal_component_length_and_then_read_component(keytab,
+                                                                                                             current_keytab_position,
                                                                                                              keytab_format_version)
                     principal_components.append(piece)
                 # principal components are separated by forwarded slashes (not encoded)
@@ -246,42 +249,48 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
                 # uint32_t name_type = 32 bits in name_type = 4 bytes to read
                 # name type is not included in format version 1 keytabs
                 if keytab_format_version != 1:
-                    name_type, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+                    name_type, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                                      current_keytab_position,
                                                                                                       PRINCIPAL_TYPE_FIELD_SIZE_BYTES,
                                                                                                       keytab_format_version)
                 else:
                     name_type = 1
 
                 # uint32_t timestamp (time key was established) = 32 bits in time = 4 bytes to read
-                timestamp, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+                timestamp, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                                  current_keytab_position,
                                                                                                   TIMESTAMP_FIELD_SIZE_BYTES,
                                                                                                   keytab_format_version)
 
                 # uint8_t vno8 = 8 bits in kvno = 1 byte to read
-                vno8, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+                vno8, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                             current_keytab_position,
                                                                                              VNO8_FIELD_SIZE_BYTES,
                                                                                              keytab_format_version)
                 vno = vno8
 
                 # keyblock structure: 16-bit value for encryption type and then counted_octet for key
-                encryption_type, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+                encryption_type, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                                        current_keytab_position,
                                                                                                         ENCRYPTION_TYPE_FIELD_SIZE,
                                                                                                         keytab_format_version)
 
-                key_length, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+                key_length, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                                   current_keytab_position,
                                                                                                    KEY_LENGTH_FIELD_SIZE_BYTES,
                                                                                                    keytab_format_version)
 
                 # we leave our key hex encoded so we don't use read_number_and_move_position
                 # since our string is hex, a byte is represented by 2 characters, so we our end index for reading our
                 # key is twice its length in bytes
-                hex_encoded_key = keytab[current_keytab_position:current_keytab_position+(key_length*2)]
+                hex_encoded_key = keytab[current_keytab_position:current_keytab_position + (key_length * 2)]
                 current_keytab_position += key_length * 2
 
                 # uint32_t vno if >=4 bytes left in entry_length_bytes
-                current_entry_length_bytes = (current_keytab_position - start_value)//2
+                current_entry_length_bytes = (current_keytab_position - start_value) // 2
                 if entry_length_bytes - current_entry_length_bytes >= VNO32_FIELD_SIZE_BYTES:
-                    vno32, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+                    vno32, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                                  current_keytab_position,
                                                                                                   VNO32_FIELD_SIZE_BYTES,
                                                                                                   keytab_format_version)
                     # We will always pick the 32-bit vno's value if it is non-zero. Due to padding all entries in a
@@ -294,7 +303,7 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
 
                 # uint32_t flags if >=4 bytes left in entry_length_bytes
                 flags = None
-                current_entry_length_bytes = (current_keytab_position - start_value)//2
+                current_entry_length_bytes = (current_keytab_position - start_value) // 2
                 if entry_length_bytes - current_entry_length_bytes >= FLAGS_FIELD_SIZE_BYTES:
                     flags, current_keytab_position = _read_bytes_to_number_and_then_move_position(
                         keytab, current_keytab_position,
@@ -310,11 +319,11 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
                 # if the dictionary details are written to data, we'll recompute the minimal length
                 # and store that instead. but for the purpose of parsing, we want to return the data exactly as it
                 # exists in the keytab file without alteration
-                current_entry_length_bytes = (current_keytab_position - start_value)//2
+                current_entry_length_bytes = (current_keytab_position - start_value) // 2
                 if current_entry_length_bytes < entry_length_bytes:
                     bytes_to_move = entry_length_bytes - current_entry_length_bytes
                     # 1 byte = 2 hex characters
-                    current_keytab_position += bytes_to_move*2
+                    current_keytab_position += bytes_to_move * 2
 
                 # subtract 8 from our start value to reintroduce the specification of how
                 # long the keytab is, which we jump over before starting the loop.
@@ -322,7 +331,7 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
                 # entry in the keytab into its own file, so we need to include the keytab length as
                 # well as the prefix indicating which version of keytab format we're using in the
                 # value
-                single_entry_value = standalone_prefix + keytab[start_value-8:current_keytab_position]
+                single_entry_value = standalone_prefix + keytab[start_value - 8:current_keytab_position]
 
                 # strip any whitespace from the front of the principal that may have gotten
                 # there when moving keytabs to canonical form, but which doesn't matter
@@ -339,7 +348,8 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str):
                 logger.debug('Skipping %s length keytab due to indication of a deleted entry', abs(entry_length_bytes))
                 current_keytab_position += abs(entry_length_bytes) * 2
         finally:
-            entry_length_bytes, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab, current_keytab_position,
+            entry_length_bytes, current_keytab_position = _read_bytes_to_number_and_then_move_position(keytab,
+                                                                                                       current_keytab_position,
                                                                                                        ENTRY_LENGTH_FIELD_SIZE_BYTES,
                                                                                                        keytab_format_version,
                                                                                                        is_signed_int=True)

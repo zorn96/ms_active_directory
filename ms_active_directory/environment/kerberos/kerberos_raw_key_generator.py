@@ -30,8 +30,8 @@ from ms_active_directory.environment.security.security_config_constants import (
 logger = logging_utils.get_logger()
 
 
-def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_computer_name:str, ad_password: str,
-                              ad_domain_dns_name: str, ad_auth_realm: str=None):
+def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_computer_name: str, ad_password: str,
+                              ad_domain_dns_name: str, ad_auth_realm: str = None):
     """ Given an encryption type, a computer name, a password, and a domain, generate the raw kerberos key for an AD
     account. Optionally, a realm may be specified if the kerberos realm for the domain is not the domain itself
     (this may be the case for subdomains or when AD is not the central authentication for an environment).
@@ -51,8 +51,8 @@ def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_computer_
     return password_string_to_key(ad_encryption_type, ad_password, salt_str, AES_ITERATIONS_FOR_AD)
 
 
-def password_bytes_to_key(ad_encryption_type: ADEncryptionType, password_bytes: bytes, salt_bytes: bytes=None,
-                          iterations: int=None):
+def password_bytes_to_key(ad_encryption_type: ADEncryptionType, password_bytes: bytes, salt_bytes: bytes = None,
+                          iterations: int = None):
     """ Given an encryption type, password bytes, and optionally salt bytes and an iteration count, generate and
     return a kerberos key for the specified encryption type using the other parameters.
     """
@@ -60,8 +60,8 @@ def password_bytes_to_key(ad_encryption_type: ADEncryptionType, password_bytes: 
     return e.password_bytes_to_key(password_bytes, salt_bytes, iterations)
 
 
-def password_string_to_key(ad_encryption_type: ADEncryptionType, password_string: str, salt_string: str=None,
-                           iterations: int=None):
+def password_string_to_key(ad_encryption_type: ADEncryptionType, password_string: str, salt_string: str = None,
+                           iterations: int = None):
     """ Given an encryption type, a string password, and optionally a string salt and an iteration count, generate and
     return a kerberos key for the specified encryption type using the other parameters.
     """
@@ -110,7 +110,7 @@ def _format_aes_salt_for_ad(computer_name: str, domain: str, realm: str):
 def _zeropad(byte_string: bytes, pad_size: int):
     # Return byte_string padded with 0 bytes to a multiple of pad_size.
     padlen = (pad_size - (len(byte_string) % pad_size)) % pad_size
-    return byte_string + b'\0'*padlen
+    return byte_string + b'\0' * padlen
 
 
 def _nfold(string_to_fold: str, nbytes: int):
@@ -122,12 +122,13 @@ def _nfold(string_to_fold: str, nbytes: int):
     nbytes
     https://tools.ietf.org/html/rfc3961#section-5.1
     """
+
     def _rotate_right(byte_string_to_rotate: str, nbits: int):
         """ Rotate the bytes in str to the right by nbits bits. """
         indices = list(range(len(byte_string_to_rotate)))
-        num_bytes, remain = (nbits//8) % len(byte_string_to_rotate), nbits % 8
-        return b''.join(bytes([(ord(byte_string_to_rotate[i-num_bytes]) >> remain) |
-                               ((ord(byte_string_to_rotate[i-num_bytes-1]) << (8-remain)) & 0xff)])
+        num_bytes, remain = (nbits // 8) % len(byte_string_to_rotate), nbits % 8
+        return b''.join(bytes([(ord(byte_string_to_rotate[i - num_bytes]) >> remain) |
+                               ((ord(byte_string_to_rotate[i - num_bytes - 1]) << (8 - remain)) & 0xff)])
                         for i in indices)
 
     def _add_ones_complement(byte_str_1: bytes, byte_str_2: bytes):
@@ -136,7 +137,7 @@ def _nfold(string_to_fold: str, nbytes: int):
         v = [a + b for a, b in list(zip(byte_str_1, byte_str_2))]
         # Propagate carry bits to the left until there aren't any left.
         while any(x & ~0xff for x in v):
-            v = [(v[i-n+1]>>8) + (v[i]&0xff) for i in list(range(n))]
+            v = [(v[i - n + 1] >> 8) + (v[i] & 0xff) for i in list(range(n))]
         return b''.join(bytes([x]) for x in v)
 
     # Concatenate copies of string_to_fold to produce the least common multiple
@@ -147,7 +148,7 @@ def _nfold(string_to_fold: str, nbytes: int):
     big_byte_str = b''.join((_rotate_right(string_to_fold, 13 * i) for i in range(lcm // byte_length_to_fold)))
     # Decompose the concatenation into slices of length nbytes, and add them together as
     # big-endian ones' complement integers.
-    slices = [big_byte_str[p:p+nbytes] for p in list(range(0, lcm, nbytes))]
+    slices = [big_byte_str[p:p + nbytes] for p in list(range(0, lcm, nbytes))]
     result = reduce(_add_ones_complement, slices)
     return result
 
@@ -163,7 +164,7 @@ class _EncTypeProfile(object):
     seed_size = None
 
     @classmethod
-    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes=None, iterations: int=None):
+    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes = None, iterations: int = None):
         raise NotImplementedError('Child classes must implement password_bytes_to_key')
 
 
@@ -176,9 +177,10 @@ class _SimplifiedEnctype(_EncTypeProfile):
     block_size = 1
 
     @classmethod
-    def basic_encrypt(clscls, key: RawKerberosKey, plaintext_bytes: bytes):
+    def basic_encrypt(cls, key: RawKerberosKey, plaintext_bytes: bytes):
         """ Placeholder to force child classes to implement this """
-        raise NotImplementedError('This function must be implemented by child classes that need key derivation or encryption')
+        raise NotImplementedError(
+            'This function must be implemented by child classes that need key derivation or encryption')
 
     @classmethod
     def derive(cls, key: RawKerberosKey, constant: str):
@@ -219,7 +221,7 @@ class _AESEnctype(_SimplifiedEnctype):
     block_size = AES_CIPHER_BLOCK_SIZE_BYTES
 
     @classmethod
-    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes, iterations: int=1):
+    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes, iterations: int = 1):
         # this is the pseudo-random function needed for our password-based key
         # derivation for AES
         prf = lambda p, s: HMAC.new(p, s, cls.sha_version).digest()
@@ -253,8 +255,8 @@ class _AESEnctype(_SimplifiedEnctype):
             # Swap the last two ciphertext blocks and truncate the
             # final block to match the plaintext length.
             lastlen = len(plaintext_bytes) % cls.block_size or cls.block_size
-            last_block_index = -1*cls.block_size
-            second_to_last_block_index = -2*cls.block_size
+            last_block_index = -1 * cls.block_size
+            second_to_last_block_index = -2 * cls.block_size
             truncated_second_to_last_block = ctext[second_to_last_block_index:second_to_last_block_index][:lastlen]
             ctext = ctext[:second_to_last_block_index] + ctext[last_block_index:] + truncated_second_to_last_block
         return ctext
@@ -280,7 +282,7 @@ class _RC4(_EncTypeProfile):
     seed_size = 16
 
     @classmethod
-    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes=None, iterations: bytes=None):
+    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes = None, iterations: bytes = None):
         # RC4 requires a shared secret that fits in the UTF8 encoding, which is
         # part of why it's considered a little less secure (smaller space).
         # we then convert the shared secret to utf16 (little-endian) and generate

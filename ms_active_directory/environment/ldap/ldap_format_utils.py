@@ -245,7 +245,8 @@ def normalize_object_location_in_domain(location: str, domain_dns_name: str):
     return strip_domain_from_object_location(location, domain_dns_name)
 
 
-def process_ldap3_conn_return_value(ldap_connection: Connection, return_value: Union[tuple, bool], paginated_response=False):
+def process_ldap3_conn_return_value(ldap_connection: Connection, return_value: Union[tuple, bool],
+                                    paginated_response=False):
     """ Thread-safe ldap3 connections return a tuple containing a boolean about success,
     the result, the response, and the request. Non-thread-safe ldap3 connections just
     leave the other fields and return a boolean when performing search/add/etc. and
@@ -320,8 +321,9 @@ def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bo
     if name.endswith('$'):
         name = name[:-1]
     if len(name) > limit:
+        insert = 'support' if supports_legacy_behavior else 'do not support'
         raise InvalidDomainParameterException('Computer name length must be fewer than {} characters for computers '
-                                              'that {} legacy behavior.'.format(limit, 'support' if supports_legacy_behavior else 'do not support'))
+                                              'that {} legacy behavior.'.format(limit, insert))
     for character in AD_USERNAME_RESTRICTED_CHARS:
         if character in name:
             raise InvalidDomainParameterException('AD computer names may not contain any of the following characters: '

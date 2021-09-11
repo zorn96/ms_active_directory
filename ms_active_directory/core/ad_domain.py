@@ -31,8 +31,10 @@ from typing import List
 from ms_active_directory import logging_utils
 from ms_active_directory.core.ad_session import ADSession
 from ms_active_directory.environment.constants import ADFunctionalLevel
-from ms_active_directory.environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, discover_ldap_domain_controllers_in_domain
-from ms_active_directory.environment.format_utils import format_computer_name_for_authentication, get_system_default_computer_name
+from ms_active_directory.environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, \
+    discover_ldap_domain_controllers_in_domain
+from ms_active_directory.environment.format_utils import format_computer_name_for_authentication, \
+    get_system_default_computer_name
 from ms_active_directory.environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
 from ms_active_directory.environment.ldap import trust_constants
 from ms_active_directory.environment.ldap.ldap_constants import (
@@ -69,15 +71,15 @@ from ms_active_directory.exceptions import (
     TrustedDomainConversionException,
 )
 
-
 logger = logging_utils.get_logger()
 
 
-def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, authentication_mechanism: str=SIMPLE,
-                   ad_site: str=None, computer_name: str=None, computer_location: str=None, computer_password: str=None,
-                   computer_encryption_types: List[ADEncryptionType]=None, computer_hostnames: List[str]=None,
-                   computer_services: List[str]=None, supports_legacy_behavior: bool=False,
-                   computer_key_file_path: str=DEFAULT_KRB5_KEYTAB_FILE_LOCATION, **additional_account_attributes):
+def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, authentication_mechanism: str = SIMPLE,
+                   ad_site: str = None, computer_name: str = None, computer_location: str = None,
+                   computer_password: str = None,
+                   computer_encryption_types: List[ADEncryptionType] = None, computer_hostnames: List[str] = None,
+                   computer_services: List[str] = None, supports_legacy_behavior: bool = False,
+                   computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION, **additional_account_attributes):
     """ A super simple 'join a domain' function that requires minimal input - the domain dns name and admin credentials
     to use in the join process.
     Given those basic inputs, the domain's nearest controllers are automatically discovered and an account is made
@@ -88,15 +90,16 @@ def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, a
     return domain.join(admin_user, admin_password, authentication_mechanism, computer_name=computer_name,
                        computer_location=computer_location, computer_password=computer_password,
                        computer_hostnames=computer_hostnames, computer_services=computer_services,
-                       computer_encryption_types=computer_encryption_types, supports_legacy_behavior=supports_legacy_behavior,
+                       computer_encryption_types=computer_encryption_types,
+                       supports_legacy_behavior=supports_legacy_behavior,
                        computer_key_file_path=computer_key_file_path, **additional_account_attributes)
 
 
 def join_ad_domain_by_taking_over_existing_computer(domain_dns_name: str, admin_user: str, admin_password: str,
-                                                    authentication_mechanism: str=SIMPLE, ad_site: str=None,
-                                                    computer_name: str=None, computer_password: str=None,
-                                                    old_computer_password: str=None,
-                                                    computer_key_file_path: str=DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
+                                                    authentication_mechanism: str = SIMPLE, ad_site: str = None,
+                                                    computer_name: str = None, computer_password: str = None,
+                                                    old_computer_password: str = None,
+                                                    computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
     """ A super simple 'join a domain' function using pre-created computer accounts, which requires minimal input -
     the domain dns name and admin credentials to use in the join process.
     Specifying a computer name explicitly for the account to take over is also highly recommended.
@@ -107,7 +110,8 @@ def join_ad_domain_by_taking_over_existing_computer(domain_dns_name: str, admin_
     """
     domain = ADDomain(domain_dns_name, site=ad_site)
     return domain.join_by_taking_over_existing_computer(admin_user, admin_password, authentication_mechanism,
-                                                        computer_name=computer_name, computer_password=computer_password,
+                                                        computer_name=computer_name,
+                                                        computer_password=computer_password,
                                                         old_computer_password=old_computer_password,
                                                         computer_key_file_path=computer_key_file_path)
 
@@ -326,7 +330,7 @@ class ADDomain:
                                                       'elements must be strings'.format(type(serv)))
         self.kerberos_uris = kerberos_uris
 
-    def is_close_in_time_to_localhost(self, ldap_connection: Connection=None, allowed_drift_seconds: int=None):
+    def is_close_in_time_to_localhost(self, ldap_connection: Connection = None, allowed_drift_seconds: int = None):
         """ Check if we're close in time to the domain.
         This is primarily useful for kerberos and TLS negotiation health.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
@@ -345,7 +349,7 @@ class ADDomain:
             diff = local_time - domain_time
         return diff < timedelta(seconds=allowed_drift_seconds)
 
-    def find_current_time(self, ldap_connection: Connection=None):
+    def find_current_time(self, ldap_connection: Connection = None):
         """ Find the current time for this domain. This is useful for detecting drift that can cause
         Kerberos and TLS issues.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
@@ -374,7 +378,7 @@ class ADDomain:
         useful_time = datetime.strptime(ad_time, '%Y%m%d%H%M%S.0Z')
         return pytz.utc.localize(useful_time)
 
-    def find_functional_level(self, ldap_connection: Connection=None):
+    def find_functional_level(self, ldap_connection: Connection = None):
         """ Find the functional level for this domain.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
         connection will be created and used.
@@ -398,7 +402,7 @@ class ADDomain:
         level_str = base_attrs.get(AD_DOMAIN_FUNCTIONAL_LEVEL)[0]
         return ADFunctionalLevel.get_functional_level_from_value(int(level_str))
 
-    def find_netbios_name(self, ldap_connection: Connection=None, force_refresh: bool=False):
+    def find_netbios_name(self, ldap_connection: Connection = None, force_refresh: bool = False):
         """ Find the netbios name for this domain. Renaming a domain is a huge task and is incredibly rare,
         so this information is cached when first read, and it only re-read if specifically requested.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
@@ -439,7 +443,7 @@ class ADDomain:
         self.netbios_name = nb_name
         return self.netbios_name
 
-    def find_supported_sasl_mechanisms(self, ldap_connection: Connection=None):
+    def find_supported_sasl_mechanisms(self, ldap_connection: Connection = None):
         """ Find the supported SASL mechanisms for this domain.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
         connection will be created and used.
@@ -462,7 +466,7 @@ class ADDomain:
         base_attrs = response[0]['attributes']
         return base_attrs.get(AD_DOMAIN_SUPPORTED_SASL_MECHANISMS, [])
 
-    def find_trusted_domains(self, ldap_connection: Connection=None):
+    def find_trusted_domains(self, ldap_connection: Connection = None):
         """ Find the trusted domains for this domain.
         An LDAP connection is technically optional, as some domains allow enumeration of trust
         relationships by anonymous users, but a connection is likely needed. If one is not specified,
@@ -589,14 +593,15 @@ class ADDomain:
         logger.debug('Successfully bound connection to AD domain %s to establish session', self.domain)
         return conn
 
-    def create_ldap_connection_as_user(self, user: str=None, password: str=None, authentication_mechanism: str=None,
+    def create_ldap_connection_as_user(self, user: str = None, password: str = None,
+                                       authentication_mechanism: str = None,
                                        **kwargs):
         """ Create an LDAP connection with AD domain authenticated as the specified user. """
         logger.info('Establishing connection with AD domain %s using LDAP authentication mechanism %s and user %s',
                     self.domain, authentication_mechanism, user)
         return self._create_connection(user, password, authentication_mechanism, **kwargs)
 
-    def create_session_as_user(self, user: str=None, password: str=None, authentication_mechanism: str=None,
+    def create_session_as_user(self, user: str = None, password: str = None, authentication_mechanism: str = None,
                                **kwargs):
         """ Create a session with AD domain authenticated as the specified user. """
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and user %s',
@@ -605,11 +610,13 @@ class ADDomain:
         session = ADSession(conn, self)
         return session
 
-    def create_ldap_connection_as_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
-                                           authentication_mechanism: str=KERBEROS, **kwargs):
+    def create_ldap_connection_as_computer(self, computer_name: str, computer_password: str = None,
+                                           check_name_format: bool = True,
+                                           authentication_mechanism: str = KERBEROS, **kwargs):
         """ Create an LDAP connection with AD domain authenticated as the specified computer. """
-        logger.info('Establishing LDAP connection with AD domain %s using LDAP authentication mechanism %s and computer %s',
-                    self.domain, authentication_mechanism, computer_name)
+        logger.info(
+            'Establishing LDAP connection with AD domain %s using LDAP authentication mechanism %s and computer %s',
+            self.domain, authentication_mechanism, computer_name)
         # reject simple binds because computers can't use them for authentication
         if authentication_mechanism == SIMPLE or authentication_mechanism == ANONYMOUS:
             raise InvalidDomainParameterException('Computers must use a form of SASL or NTLM for authenticating LDAP '
@@ -622,8 +629,9 @@ class ADDomain:
                                                                      authentication_mechanism)
         return self._create_connection(formatted_name, computer_password, authentication_mechanism, **kwargs)
 
-    def create_session_as_computer(self, computer_name: str, computer_password: str=None, check_name_format: bool=True,
-                                   authentication_mechanism: str=KERBEROS, **kwargs):
+    def create_session_as_computer(self, computer_name: str, computer_password: str = None,
+                                   check_name_format: bool = True,
+                                   authentication_mechanism: str = KERBEROS, **kwargs):
         """ Create a session with AD domain authenticated as the specified computer. """
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and computer %s',
                     self.domain, authentication_mechanism, computer_name)
@@ -632,11 +640,11 @@ class ADDomain:
         session = ADSession(conn, self)
         return session
 
-    def join(self, admin_username: str, admin_password: str, authentication_mechanism: str=SIMPLE,
-             computer_name: str=None, computer_location: str=None, computer_password: str=None,
-             computer_encryption_types: List[ADEncryptionType]=None, computer_hostnames: List[str]=None,
-             computer_services: List[str]=None, supports_legacy_behavior: bool=False,
-             computer_key_file_path: str=DEFAULT_KRB5_KEYTAB_FILE_LOCATION,
+    def join(self, admin_username: str, admin_password: str, authentication_mechanism: str = SIMPLE,
+             computer_name: str = None, computer_location: str = None, computer_password: str = None,
+             computer_encryption_types: List[ADEncryptionType] = None, computer_hostnames: List[str] = None,
+             computer_services: List[str] = None, supports_legacy_behavior: bool = False,
+             computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION,
              **additional_account_attributes):
         """ A super simple 'join the domain' function that requires minimal input - just admin user credentials
         to use in the join process.
@@ -645,7 +653,8 @@ class ADDomain:
         hostname by default.
         """
         ad_session = self.create_session_as_user(admin_username, admin_password, authentication_mechanism)
-        return join_ad_domain_using_session(ad_session, computer_name=computer_name, computer_location=computer_location,
+        return join_ad_domain_using_session(ad_session, computer_name=computer_name,
+                                            computer_location=computer_location,
                                             computer_password=computer_password, computer_hostnames=computer_hostnames,
                                             computer_services=computer_services,
                                             computer_encryption_types=computer_encryption_types,
@@ -654,9 +663,9 @@ class ADDomain:
                                             **additional_account_attributes)
 
     def join_by_taking_over_existing_computer(self, admin_username: str, admin_password: str,
-                                              authentication_mechanism: str=SIMPLE, computer_name: str=None,
-                                              computer_password: str=None, old_computer_password: str=None,
-                                              computer_key_file_path: str=DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
+                                              authentication_mechanism: str = SIMPLE, computer_name: str = None,
+                                              computer_password: str = None, old_computer_password: str = None,
+                                              computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
         """ A super simple 'join the domain' function that requires minimal input - just admin user credentials
         to use in the join process.
         Given those basic inputs, the domain's settings are used to establish a connection, and an account is made
@@ -857,7 +866,8 @@ class ADTrustedDomain:
 
     def is_transitive_trust(self):
         inherently_transitive = self.is_cross_forest_trust()
-        explicitly_non_transitive = bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_NON_TRANSITIVE_BIT)
+        explicitly_non_transitive = bool(
+            self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_NON_TRANSITIVE_BIT)
         return inherently_transitive and not explicitly_non_transitive
 
     def is_cross_forest_trust(self):
@@ -883,8 +893,8 @@ class ADTrustedDomain:
     def uses_sid_filtering(self):
         return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_QUARANTINED_DOMAIN_BIT)
 
-    def create_transfer_session_to_trusted_domain(self, ad_session: ADSession, converted_ad_domain: ADDomain=None,
-                                                  skip_validation: bool=False):
+    def create_transfer_session_to_trusted_domain(self, ad_session: ADSession, converted_ad_domain: ADDomain = None,
+                                                  skip_validation: bool = False):
         """ Create a session with this trusted domain that functionally transfers the authentication of a given session.
         This is useful for transferring a kerberos/ntlm session to create new sessions for querying in trusted domains
         without needing to provide credentials ever time.

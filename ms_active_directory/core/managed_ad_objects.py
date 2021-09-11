@@ -1,6 +1,7 @@
 from ms_active_directory import logging_utils
 
 from typing import List, TYPE_CHECKING
+
 if TYPE_CHECKING:
     from ms_active_directory.core.ad_domain import ADDomain
 
@@ -30,8 +31,8 @@ logger = logging_utils.get_logger()
 
 class ManagedADObject:
 
-    def __init__(self, samaccount_name: str, domain: 'ADDomain', location: str=None,
-                 password: str=None):
+    def __init__(self, samaccount_name: str, domain: 'ADDomain', location: str = None,
+                 password: str = None):
         self.samaccount_name = samaccount_name
         self.domain = domain
         self.domain_dns_name = self.domain.get_domain_dns_name()
@@ -51,9 +52,9 @@ class ManagedADObject:
 
 class ManagedADComputer(ManagedADObject):
 
-    def __init__(self, samaccount_name: str, domain: 'ADDomain', location: str=None,
-                 password: str=None, service_principal_names: List[str]=None,
-                 encryption_types: List[ADEncryptionType]=None, kvno: int=None):
+    def __init__(self, samaccount_name: str, domain: 'ADDomain', location: str = None,
+                 password: str = None, service_principal_names: List[str] = None,
+                 encryption_types: List[ADEncryptionType] = None, kvno: int = None):
         super().__init__(samaccount_name, domain, location, password)
         self.computer_name = self.samaccount_name[:-1]
         self.name = self.computer_name
@@ -107,8 +108,9 @@ class ManagedADComputer(ManagedADObject):
         :param encryption_type: The encryption type to add to the computer.
         """
         if encryption_type in self.encryption_types:
-            logger.debug('No change resulted from adding encryption type %s to computer %s locally as it was already present',
-                         encryption_type, self.computer_name)
+            logger.debug(
+                'No change resulted from adding encryption type %s to computer %s locally as it was already present',
+                encryption_type, self.computer_name)
             return
         if self.password is None:
             raise InvalidComputerParameterException('Encryption types can only be added to a computer locally if its '
@@ -139,8 +141,9 @@ class ManagedADComputer(ManagedADObject):
         :param service_principal_name: The service principal name to add to the computer.
         """
         if service_principal_name in self.service_principal_names:
-            logger.debug('No change resulted from adding service principal name %s as it was already present for computer %s',
-                         service_principal_name, self.computer_name)
+            logger.debug(
+                'No change resulted from adding service principal name %s as it was already present for computer %s',
+                service_principal_name, self.computer_name)
             return
         logger.debug('Adding service principal name %s to computer %s locally',
                      service_principal_name, self.computer_name)
@@ -329,5 +332,5 @@ class ManagedADComputer(ManagedADObject):
         :param password: The string password to set for the computer.
         """
         self.kvno += 1
-        logger.debug('Updated kvno for computer %s from %s to %s', self.computer_name, self.kvno-1, self.kvno)
+        logger.debug('Updated kvno for computer %s from %s to %s', self.computer_name, self.kvno - 1, self.kvno)
         self.set_password_locally(password)
