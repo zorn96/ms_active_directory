@@ -26,11 +26,12 @@ and all LDAP basic, NTLM, and SASL authentication mechanisms (e.g. Kerberos) sup
 5. Finding users, computers, and groups based on a variety of properties (e.g. name, SID, user-specified properties)
 6. Querying information about users, computers, groups, and generic objects
 7. Looking up user, computer, and group memberships
-8. Adding and removing users, computers, and groups to and from other groups
-9. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
-10. Looking up information about the permissions set on a user, computer, group, or generic object
-11. Adding permissions to the security descriptor for a user, computer, group, or generic object
-12. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
+8. Looking up members of groups, regardless of type, and their attributes
+9. Adding and removing users, computers, and groups to and from other groups
+10. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
+12. Looking up information about the permissions set on a user, computer, group, or generic object
+13. Adding permissions to the security descriptor for a user, computer, group, or generic object
+14. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
     or overwriting values.
 
 
