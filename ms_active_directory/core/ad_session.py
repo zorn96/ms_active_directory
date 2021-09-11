@@ -16,6 +16,7 @@ from ldap3 import (
     SUBTREE,
 )
 from ldap3.protocol.rfc4511 import Control
+from ldap3.utils.dn import parse_dn
 from typing import List, Union, TYPE_CHECKING
 if TYPE_CHECKING:
     from ms_active_directory.core.ad_domain import ADDomain
@@ -178,7 +179,8 @@ class ADSession:
                                           search_scope=BASE,
                                           size_limit=1)
         exists, result, _, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
-        search_err = result['result'] != 0
+        # no such object should be considered an okay search
+        search_err = result['result'] != 0 and result['result'] != ldap_constants.NO_SUCH_OBJECT
         if search_err:
             raise DomainSearchException('An error was encountered searching the domain to determine if {} exists. '
                                         'This may have occurred due to domain unavailability or a permission '
@@ -205,7 +207,8 @@ class ADSession:
                                           attributes=[attr],
                                           size_limit=1)
         _, result, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
-        search_err = result['result'] != 0
+        # no such object should be considered an okay search
+        search_err = result['result'] != 0 and result['result'] != ldap_constants.NO_SUCH_OBJECT
         if search_err:
             raise DomainSearchException('An error was encountered searching the domain to determine if an object '
                                         'exists with value {} for attribute {}. This may have occurred due to domain '
@@ -989,6 +992,9 @@ class ADSession:
         # hit a level where a piece is missing, or until we find the full distinguished name version
         # of the windows path name
         name_pieces = re.split(r'(?<!\\)/', normalized_canonical_name)  # split on unescaped / characters
+        # replace escaped forward slashes with unescaped forward slashes because forward slashes are not
+        # escaped in distinguished names
+        name_pieces = [piece.replace('\\/', '/') for piece in name_pieces]
         num_pieces = len(name_pieces)
         ad_obj = None
         if num_pieces == 0:
@@ -999,7 +1005,7 @@ class ADSession:
             escaped_piece_name = ldap_utils.escape_generic_filter_value(piece)
             logger.info('Searching for %s within %s', escaped_piece_name, current_location)
             # use name instead of common name in order to work for OUs and Containers
-            to_find = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_NAME, piece)
+            to_find = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_NAME, escaped_piece_name)
             attrs = []
             if index == num_pieces-1:  # last object, get the attributes
                 attrs = attributes_to_lookup
