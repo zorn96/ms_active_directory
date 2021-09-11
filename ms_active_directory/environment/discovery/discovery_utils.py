@@ -211,7 +211,7 @@ def _process_sort_return_rtt_ordering_results(lookup_rtt_fns: List[Callable], ur
 def _check_ldap_server_availability_and_rtt(server_host: str, server_port: str, source_ip: str, secure: bool):
     """ Even if an LDAP server is registered in DNS, it might not be reachable for us. DNS is
     centralized, but data centers may have multiple network partitions, and there may be firewalls
-    or air gaps in our way (we've seen this at customer sites).
+    or air gaps in our way.
     A server could also be down.
 
     This will check if a server is available and return a tuple of the URI and the time it took to
@@ -251,7 +251,7 @@ def _check_ldap_server_availability_and_rtt(server_host: str, server_port: str, 
 def _check_kdc_availability_and_rtt(server_host: str, server_port: str, source_ip: str):
     """ Even if an KDC server is registered in DNS, it might not be reachable for us. DNS is
     centralized, but data centers may have multiple network partitions, and there may be firewalls
-    or air gaps in our way (we've seen this at customer sites).
+    or air gaps in our way.
     A server could also be down.
 
     This will check if a server is available and return a tuple of the URI and the time it took to

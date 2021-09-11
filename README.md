@@ -285,7 +285,8 @@ A number of customizations exist for security reasons.
 
 You can change things like the encryption types enabled on the account to support older clients.
 You can also change location where the account is created when joining a domain in order to use
-a less privileged user for the act of joining.
+a less privileged user for the act of joining. Locations can be LDAP distinguished names or windows
+path style canonical names.
 
 You can also set the computer name if you have a desired naming scheme. This will impact the hostnames
 configured in the domain for the computer.
@@ -303,7 +304,12 @@ legacy_enc_type = ADEncryptionType.RC4_HMAC
 new_enc_type = ADEncryptionType.AES256_CTS_HMAC_SHA1_96
 
 comp = join_ad_domain(domain, less_privileged_user, password, computer_name=computer_name,
-                      computer_location=password, computer_encryption_types=[legacy_enc_type, new_enc_type])
+                      computer_location=less_privileged_loc, computer_encryption_types=[legacy_enc_type, new_enc_type])
+                      
+alt_format_loc = '/ops/service-machines'
+comp = join_ad_domain(domain, less_privileged_user, password, computer_name=computer_name,
+                      computer_location=alt_format_loc, computer_encryption_types=[legacy_enc_type, new_enc_type])
+
 ```
 
 You can also manually set the computer password. The default is to generate a random 120

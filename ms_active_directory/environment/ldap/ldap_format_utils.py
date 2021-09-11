@@ -37,6 +37,25 @@ def is_dn(anything: str):
         return False
 
 
+def strip_domain_from_canonical_name(location: str, domain_dns_name: str):
+    """ Given a location that is not a relative distinguished name, normalize it by re,oving the domain
+    dns name and leading / if necessary.
+    """
+    domain_lower = domain_dns_name.lower()
+    if not location:  # root of the domain
+        return domain_dns_name.lower()
+
+    location_lower = location.lower()
+    # if our name already starts with our domain, just make sure it's lower case
+    if location_lower.startswith(domain_lower):
+        trim_length = len(domain_lower)
+        location = location[trim_length:]
+    # otherwise, stick on DOMAIN/ at the start
+    if location.startswith('/'):
+        location = location[1:]
+    return location
+
+
 def convert_to_ldap_iterable(anything):
     """ LDAP and the ldap3 library require that all attributes used in a modification operation be specified
     in a list. Even if the attribute is single-valued and reads as single-valued, like userAccountControl,
@@ -167,7 +186,8 @@ def escape_bytestring_for_filter(byte_str: bytes):
     return hex_escape_char + hex_escape_char.join(hex_str[i:i+2] for i in range(0, len(hex_str), 2))
 
 
-def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], lookup_by_name_fn: callable, controls: List):
+def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], lookup_by_name_fn: callable, controls: List,
+                                     skip_validation=False):
     """ Given a list of entities that might be AD objects or strings, return a map of LDAP distinguished names
     for the entities.
     """
@@ -176,7 +196,7 @@ def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], looku
     entity_dns = {}
     for entity in entities:
         if isinstance(entity, str):
-            if is_dn(entity):
+            if skip_validation or is_dn(entity):  # skip our mapping to dn if we don't care about the input format
                 # cast to lowercase for case-insensitive checks later
                 entity_dn = entity.lower()
             elif lookup_by_name_fn is None:
@@ -211,18 +231,17 @@ def normalize_object_location_in_domain(location: str, domain_dns_name: str):
 
     Windows Path Style looks like this:
     computers/
-    or fully qualified:
+    or fully canonical:
     example.com/computers
 
-    This function tries to normalize everything to the LDAP style using the relative DN format, since the library
-    is primarily LDAP based.
-    Currently, windows path style will be rejected. This is because we'd need to make LDAP queries at each level
-    to determine the proper naming attribute for the next level (e.g. CN or OU). We can do that, but we'd need a
-    connection already established or credentials.
+    This function tries to normalize everything to the appropriate format based on the input format.
+    So if the input format is an LDAP distinguished name, we will normalize to an LDAP style using the relative DN
+    format.
+    If the input format is a windows path style name, we will normalize to a windows canonical name format and
+    remove the domain piece.
     """
-    # TODO: make windows path style names work
     if not is_dn(location):
-        raise NotImplementedError('Windows-style paths are not supported')
+        return strip_domain_from_canonical_name(location, domain_dns_name)
     return strip_domain_from_object_location(location, domain_dns_name)
 
 
@@ -280,7 +299,7 @@ def strip_domain_from_object_location(location: str, domain_dns_name: str):
     if location is None:
         return location
 
-    # cast everything to uppercase in order to avoid worrying about how a customer chose to type their DN.
+    # cast everything to uppercase in order to avoid worrying about how a user chose to type their DN.
     # place a comma in front of the domain RDN so that any stripping we do will strip the trailing comma
     domain_rdn_upper = ',' + construct_ldap_base_dn_from_domain(domain_dns_name).upper()
     location = location.upper()

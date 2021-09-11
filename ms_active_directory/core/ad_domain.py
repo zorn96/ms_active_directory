@@ -904,7 +904,7 @@ class ADTrustedDomain:
                                 to avoid needing to wait for changes to propagate to make use of the new trust.
                                 If not specified, defaults to True.
         :returns: An ADSession representing the transferred authentication to the trusted domain.
-        :raises SessionTransferException: If any validation fails when transferring the session.
+        :raises: SessionTransferException If any validation fails when transferring the session.
         :raises: Other LDAP exceptions if the attempt to bind the transfer session in the trusted domain fails due to
                  authentication issues (e.g. trying to use a non-transitive trust when transferring a user that is
                  not from the primary domain, transferring across a one-way trust when skipping validation,
