@@ -43,7 +43,8 @@ class RawKerberosKey:
         return self.raw_hex_encoded_key
 
     def uses_active_directory_supported_encryption_type(self):
-        return isinstance(self.encryption_type, ADEncryptionType) or self.encryption_type in KRB5_ENC_TYPE_TO_AD_ENC_TYPE_MAP
+        return (isinstance(self.encryption_type, ADEncryptionType)
+                or self.encryption_type in KRB5_ENC_TYPE_TO_AD_ENC_TYPE_MAP)
 
 
 class GssKerberosKey:
@@ -52,9 +53,9 @@ class GssKerberosKey:
     encryption type, etc.
     """
 
-    def __init__(self, principal: str, realm: str, raw_key: RawKerberosKey, kvno: int, flags: int=None,
-                 timestamp: int=None, gss_name_type: int=DEFAULT_UNKNOWN_NAME_TYPE,
-                 format_version: int=PREFERRED_KEYTAB_FORMAT_VERSION):
+    def __init__(self, principal: str, realm: str, raw_key: RawKerberosKey, kvno: int, flags: int = None,
+                 timestamp: int = None, gss_name_type: int = DEFAULT_UNKNOWN_NAME_TYPE,
+                 format_version: int = PREFERRED_KEYTAB_FORMAT_VERSION):
         self.principal = principal
         self.realm = realm
         self.raw_key = raw_key
@@ -79,7 +80,7 @@ class GssKerberosKey:
         self.format_version = format_version
         self.complete_keytab_bytes = None
 
-    def get_complete_keytab_bytes(self, format_version: int=None, use_current_time: bool=None):
+    def get_complete_keytab_bytes(self, format_version: int = None, use_current_time: bool = None):
         """ Get this key object encoded as the bytes of a complete, usable keytab that can be written
         to a file and used for kerberos authentication (initiating or accepting contexts).
         :param format_version: An keytab format version. If not specified, defaults to the format version

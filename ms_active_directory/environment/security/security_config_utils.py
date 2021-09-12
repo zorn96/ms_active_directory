@@ -33,7 +33,7 @@ def encode_password(password: str):
     return encoded_pw
 
 
-def generate_random_ad_password(password_length: int=120):
+def generate_random_ad_password(password_length: int = 120):
     """ Generates a random computer password by generating random characters in the valid range for
     AD passwords until we reach the specified length.
     :param password_length: The length of the password to generate. Defaults to 120 characters if not
