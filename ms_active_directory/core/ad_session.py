@@ -1699,6 +1699,104 @@ class ADSession:
                 group_to_members_map[group].append(member_obj)
         return group_to_members_map
 
+    def find_members_of_group_recursive(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
+                                        controls: List[Control] = None, skip_validation: bool = False,
+                                        maximum_nesting_depth: int = None, flatten: bool = False):
+        """ Find the members of a group in the domain, along with attributes of the members.
+
+        :param group: Either a string name of a group or ADGroup to look up the members of.
+        :param attributes_to_lookup: Attributes to look up about the members of each group.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all members exist and do not raise an error if we fail to look one up.
+                                Instead, a placeholder object will be used for members that could not be found.
+                                Defaults to False.
+        :param maximum_nesting_depth: A limit to the number of levels of nesting to recurse beyond the first lookup.
+                                      A level of 0 makes this behave the same as find_members_of_groups and a level of
+                                      None means recurse until we've gone through all nesting. Defaults to None.
+        :param flatten: If set to True, a 1-item list of a single dictionary mapping the input group to a list of
+                        all members found recursively will be returned. This discards information about whether
+                        a member is a direct member or is a member via nesting, and what those relationships are.
+                        As an example, instead of returning [{group1 -> [group2, user1]}, {group2 -> [user2, user3]}],
+                        we would return [{group1 -> [group2, user1, user2, user3]}]. This makes iterating members
+                        simpler, but removes the ability to use information about the descendants of nested groups
+                        as independent groups later on.
+                        Defaults to False.
+        :return: A list of dictionaries mapping groups to objects representing the group's members.
+                 The first dictionary maps the input group to its members; the second dictionary maps the groups that
+                 were members of the groups in the first dictionary to their members, and so on and so forth.
+                 The objects may be of type ADUser, ADComputer, ADGroup, etc. - this function attempts to cast all
+                 member objects to the most accurate object type representing them. ADObject will be used for members
+                 that do not match any of the more specific object types in the library
+                 (e.g. foreign security principals).
+        :raises: InvalidLdapParameterException if the group is not a string or ADGroup
+        :raises: ObjectNotFoundException if the group cannot be found.
+        :raises: DomainSearchException if skip_validation is False and any group members cannot be found.
+        """
+        maps = self.find_members_of_groups_recursive([group], attributes_to_lookup, controls=controls,
+                                                     skip_validation=skip_validation,
+                                                     maximum_nesting_depth=maximum_nesting_depth)
+        if not flatten or len(maps) == 1:
+            return maps
+        # start with a set of the direct members of our group
+        all_unique_members = set(maps[0][group])
+        logger.debug('Beginning flattening with %s direct members of group', len(all_unique_members))
+        for index, groups_to_members_map in enumerate(maps[1:]):
+            logger.debug('Flattening the members of %s groups nested %s level deep', len(groups_to_members_map), index)
+            all_member_lists = groups_to_members_map.values()
+            for member_list in all_member_lists:
+                all_unique_members.update(member_list)
+        logger.debug('%s unique members found after flattening', len(all_unique_members))
+        return [{group: list(all_unique_members)}]
+
+    def find_members_of_groups_recursive(self, groups: List[Union[str, ADGroup]], attributes_to_lookup: List[str] = None,
+                                         controls: List[Control] = None, skip_validation: bool = False,
+                                         maximum_nesting_depth: int = None):
+        """ Find the members of a group in the domain, along with attributes of the members.
+
+        :param groups: Either a string name of a group or ADGroup to look up the members of.
+        :param attributes_to_lookup: Attributes to look up about the members of each group.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all members exist and do not raise an error if we fail to look one up.
+                                Instead, a placeholder object will be used for members that could not be found.
+                                Defaults to False.
+        :param maximum_nesting_depth: A limit to the number of levels of nesting to recurse beyond the first lookup.
+                                      A level of 0 makes this behave the same as find_members_of_groups and a level of
+                                      None means recurse until we've gone through all nesting. Defaults to None.
+        :return: A list of dictionaries mapping groups to objects representing the group's members.
+                 The first dictionary maps the input groups to members; the second dictionary maps the groups that
+                 were members of the groups in the first dictionary to their members, and so on and so forth.
+                 The objects may be of type ADUser, ADComputer, ADGroup, etc. - this function attempts to cast all
+                 member objects to the most accurate object type representing them. ADObject will be used for members
+                 that do not match any of the more specific object types in the library
+                 (e.g. foreign security principals).
+        :raises: InvalidLdapParameterException if the group is not a string or ADGroup
+        :raises: ObjectNotFoundException if the group cannot be found.
+        :raises: DomainSearchException if skip_validation is False and any group members cannot be found.
+        """
+        groups_to_members_maps = []
+        depth = 0
+        next_level_of_groups_to_lookup = groups
+        # keep going while we have groups to lookup and haven't hit our max depth
+        while next_level_of_groups_to_lookup and (maximum_nesting_depth is None or maximum_nesting_depth >= depth):
+            groups_to_members_map = self.find_members_of_groups(next_level_of_groups_to_lookup, attributes_to_lookup,
+                                                                controls=controls, skip_validation=skip_validation)
+            groups_to_members_maps.append(groups_to_members_map)
+            all_members_that_are_groups = set()
+            for member_list in groups_to_members_map.values():
+                members_that_are_groups = {member for member in member_list if isinstance(member, ADGroup)}
+                all_members_that_are_groups.update(members_that_are_groups)
+
+            next_level_of_groups_to_lookup = list(all_members_that_are_groups)
+            depth += 1
+        # if we ran out of nesting before we hit our depth, append empty dicts as needed
+        while maximum_nesting_depth is not None and len(groups_to_members_maps) < maximum_nesting_depth + 1:
+            groups_to_members_maps.append({})
+        return groups_to_members_maps
+
     # FUNCTIONS FOR MODIFYING MEMBERSHIPS
 
     def _something_members_to_or_from_groups(self, members: List[Union[str, ADObject]],

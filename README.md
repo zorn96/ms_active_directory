@@ -26,7 +26,8 @@ and all LDAP basic, NTLM, and SASL authentication mechanisms (e.g. Kerberos) sup
 5. Finding users, computers, and groups based on a variety of properties (e.g. name, SID, user-specified properties)
 6. Querying information about users, computers, groups, and generic objects
 7. Looking up user, computer, and group memberships
-8. Looking up members of groups, regardless of type, and their attributes
+8. Looking up members of groups, regardless of type, and their attributes. This can also be done with auto-recursion
+   for nested groups.
 9. Adding and removing users, computers, and groups to and from other groups
 10. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
 12. Looking up information about the permissions set on a user, computer, group, or generic object
@@ -616,6 +617,44 @@ for group_list in user1_second_level_groups_map.values():
             all_second_level_groups.append(group)
 all_user1_groups_in_2_levels = user1_groups + all_second_level_groups
 ```
+
+## Finding the members of groups
+
+You can look up the members of one or more groups and get attributes about those
+members.
+```
+from ms_active_directory import ADDomain, ADUser, ADGroup
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+# get emails of users and groups that are members
+desired_attrs = ['mail'] 
+
+# look up members of a single group
+single_group_member_list = session.find_members_of_group('group1', desired_attrs)
+
+# look up members of multiple groups at once
+groups = ['group1', 'group2']
+group_to_member_list_map = session.find_members_of_groups(groups, desired_attrs)
+group2_member_list = group_to_member_list_map['group2']
+group2_user_members = [mem for mem in group2_member_list if isintance(mem, ADUser)]
+group2_group_members = [mem for mem in group2_member_list if isintance(mem, ADGroup)]
+```
+
+You can also look up members recursively to handle nesting.
+A maximum depth for lookups may be specified, but by default all
+nesting will be enumerated.
+``` 
+from ms_active_directory import ADDomain, ADUser, ADGroup
+domain = ADDomain('example.com')
+session = domain.create_session_as_user('username@example.com', 'password')
+
+# get emails of users and groups that are members
+desired_attrs = ['mail'] 
+group_name = 'has-groups-as-members'
+groups_to_member_lists_maps = session.find_members_of_groups_recursive(group_name, desired_attrs)
+```
+
 
 ## Adding users to groups
 You can add users to groups by specifying a list of `ADUser` objects or string names of
