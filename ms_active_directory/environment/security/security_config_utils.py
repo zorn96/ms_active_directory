@@ -5,7 +5,7 @@ import random
 
 from ms_active_directory import logging_utils
 
-from typing import List
+from typing import List, Union
 
 from ms_active_directory.environment.security.security_config_constants import (
     AD_PASSWORD_CHAR_RANGE,
@@ -45,7 +45,7 @@ def generate_random_ad_password(password_length: int = 120):
     return password
 
 
-def get_supported_encryption_types_value(encryption_types: List[ADEncryptionType]):
+def get_supported_encryption_types_value(encryption_types: List[Union[str, ADEncryptionType]]):
     """ Calculates the number that represents the list of encryption types by adding their values
     in the bit map.
     """
@@ -79,7 +79,7 @@ def get_supported_encryption_type_enums_from_value(encryption_types_value: int):
     return encryption_types
 
 
-def normalize_encryption_type_list(encryption_types: List[ADEncryptionType]):
+def normalize_encryption_type_list(encryption_types: List[Union[str, ADEncryptionType]]):
     """ Given a list of encryption types, which may be strings or enums, normalize them to enums. """
     normalized_list = []
     valid_strings = sorted(ENCRYPTION_TYPE_STR_TO_ENUM.keys())

@@ -73,7 +73,7 @@ class ADObject:
             return copy.deepcopy(val[0])
         return copy.deepcopy(val)
 
-    def is_of_object_class(self, obj_cls: str):
+    def is_of_object_class(self, obj_cls: str) -> bool:
         """ Returns true if this object has the specified object class as one of its object classes. """
         if (not obj_cls) or (not self.object_classes):
             return False

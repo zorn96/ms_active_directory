@@ -31,7 +31,7 @@ logger = logging_utils.get_logger()
 
 
 def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_computer_name: str, ad_password: str,
-                              ad_domain_dns_name: str, ad_auth_realm: str = None):
+                              ad_domain_dns_name: str, ad_auth_realm: str = None) -> RawKerberosKey:
     """ Given an encryption type, a computer name, a password, and a domain, generate the raw kerberos key for an AD
     account. Optionally, a realm may be specified if the kerberos realm for the domain is not the domain itself
     (this may be the case for subdomains or when AD is not the central authentication for an environment).
@@ -52,7 +52,7 @@ def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_computer_
 
 
 def password_bytes_to_key(ad_encryption_type: ADEncryptionType, password_bytes: bytes, salt_bytes: bytes = None,
-                          iterations: int = None):
+                          iterations: int = None) -> RawKerberosKey:
     """ Given an encryption type, password bytes, and optionally salt bytes and an iteration count, generate and
     return a kerberos key for the specified encryption type using the other parameters.
     """
@@ -61,7 +61,7 @@ def password_bytes_to_key(ad_encryption_type: ADEncryptionType, password_bytes: 
 
 
 def password_string_to_key(ad_encryption_type: ADEncryptionType, password_string: str, salt_string: str = None,
-                           iterations: int = None):
+                           iterations: int = None) -> RawKerberosKey:
     """ Given an encryption type, a string password, and optionally a string salt and an iteration count, generate and
     return a kerberos key for the specified encryption type using the other parameters.
     """
@@ -107,13 +107,13 @@ def _format_aes_salt_for_ad(computer_name: str, domain: str, realm: str):
     return salt_string
 
 
-def _zeropad(byte_string: bytes, pad_size: int):
+def _zeropad(byte_string: bytes, pad_size: int) -> bytes:
     # Return byte_string padded with 0 bytes to a multiple of pad_size.
     padlen = (pad_size - (len(byte_string) % pad_size)) % pad_size
     return byte_string + b'\0' * padlen
 
 
-def _nfold(string_to_fold: str, nbytes: int):
+def _nfold(string_to_fold: str, nbytes: int) -> bytes:
     """ This function is really hard to read because heavy math doesn't translate super well to
     python. This would actually be more readable in python2 where you can freely float between
     bytes and strings (which might be more readable computing byte-based functions using
@@ -183,7 +183,7 @@ class _SimplifiedEnctype(_EncTypeProfile):
             'This function must be implemented by child classes that need key derivation or encryption')
 
     @classmethod
-    def derive(cls, key: RawKerberosKey, constant: str):
+    def derive(cls, key: RawKerberosKey, constant: str) -> RawKerberosKey:
         """ Derive a kerberos key from some key and some constant.
         By mixing a key with a constant, you can essentially make the key
         "service-unique" so that if I use a password to generate a kerberos
@@ -221,7 +221,7 @@ class _AESEnctype(_SimplifiedEnctype):
     block_size = AES_CIPHER_BLOCK_SIZE_BYTES
 
     @classmethod
-    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes, iterations: int = 1):
+    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes, iterations: int = 1) -> RawKerberosKey:
         # this is the pseudo-random function needed for our password-based key
         # derivation for AES
         prf = lambda p, s: HMAC.new(p, s, cls.sha_version).digest()
@@ -246,7 +246,7 @@ class _AESEnctype(_SimplifiedEnctype):
         return cls.derive(tkey, 'kerberos')
 
     @classmethod
-    def basic_encrypt(cls, key: RawKerberosKey, plaintext_bytes: bytes):
+    def basic_encrypt(cls, key: RawKerberosKey, plaintext_bytes: bytes) -> bytes:
         # CBC = cipher block chaining
         aes = AES.new(key.key_bytes, AES.MODE_CBC, b'\0' * cls.block_size)
         # pad our plaintext to a multiple of the AES block size
@@ -282,7 +282,8 @@ class _RC4(_EncTypeProfile):
     seed_size = 16
 
     @classmethod
-    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes = None, iterations: bytes = None):
+    def password_bytes_to_key(cls, password_bytes: bytes, salt_bytes: bytes = None,
+                              iterations: bytes = None) -> RawKerberosKey:
         # RC4 requires a shared secret that fits in the UTF8 encoding, which is
         # part of why it's considered a little less secure (smaller space).
         # we then convert the shared secret to utf16 (little-endian) and generate
