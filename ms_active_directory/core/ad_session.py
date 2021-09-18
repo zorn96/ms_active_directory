@@ -552,7 +552,7 @@ class ADSession:
                                           attributes=[ldap_constants.AD_ATTRIBUTE_CA_CERT],
                                           controls=controls)
         success, result, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
-        search_err = result['result'] != 0
+        search_err = result['result'] != 0 and result['result'] != ldap_constants.NO_SUCH_OBJECT
         if search_err:
             raise DomainSearchException('Failed to search domain for Certificate Authorities')
         entities = ldap_utils.remove_ad_search_refs(entities)
@@ -602,7 +602,7 @@ class ADSession:
                                           search_scope=SUBTREE, attributes=[ldap_constants.AD_ATTRIBUTE_DNS_HOST_NAME],
                                           controls=controls)
         success, result, entities, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
-        search_err = result['result'] != 0
+        search_err = result['result'] != 0 and result['result'] != ldap_constants.NO_SUCH_OBJECT
         if search_err:
             raise DomainSearchException('Failed to search domain for Computers hosting DNS services')
         entities = ldap_utils.remove_ad_search_refs(entities)
@@ -737,7 +737,7 @@ class ADSession:
                                               controls=controls)
         _, result, resp, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res,
                                                                         paginated_response=paginate)
-        search_err = result['result'] != 0
+        search_err = result['result'] != 0 and result['result'] != ldap_constants.NO_SUCH_OBJECT
         if search_err:
             raise DomainSearchException('An error was encountered searching the domain; this may be due to a '
                                         'permission issue or an domain resource availability issue. Raw '
