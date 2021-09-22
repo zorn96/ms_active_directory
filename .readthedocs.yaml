@@ -17,4 +17,4 @@ formats:
 python:
    version: "3.8"
    install:
-   - requirements: requirements_dev.txt
+   - requirements: requirements_docs.txt
