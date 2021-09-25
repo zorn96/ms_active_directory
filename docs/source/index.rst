@@ -26,6 +26,9 @@ Contents
 --------
 
 .. toctree::
-   :maxdepth: 3
+   :maxdepth: 2
 
    welcome
+   primary_object_index
+   info_object_index
+   exceptions

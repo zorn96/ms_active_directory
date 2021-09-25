@@ -118,7 +118,7 @@ If you want to keep this project up and running you can send me an Amazon gift c
 improve my skills in the Information and Communication technologies.
 
 
-Thanks to
+Acknowledgements and Shout-outs
 ---------
 
 * **Ilya Etingof**, the author of the *pyasn1* package for his excellent work and support.
