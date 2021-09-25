@@ -1,11 +1,7 @@
 # this includes all of the optional packages (e.g. gssapi is only needed if you want to use kerberos)
 # during development/testing all packages should be installed
 # this also includes requirements for building docs
-dnspython>=2.1.0
-ldap3>=2.8.0
 pyasn1>=0.4.6
-pycryptodome>=3.9.0
-pytz
 six>=1.15.0
 sphinx>=3.03
 sphinx_rtd_theme>=0.4.3
