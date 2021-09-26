@@ -791,14 +791,52 @@ class ADDomain:
     def create_ldap_connection_as_user(self, user: str = None, password: str = None,
                                        authentication_mechanism: str = None,
                                        **kwargs) -> Connection:
-        """ Create an LDAP connection with AD domain authenticated as the specified user. """
+        """ Create an LDAP connection with AD domain authenticated as the specified user.
+
+        :param user: The name of the user to use when authenticating with the domain. This should be formatted based
+                     on the authentication mechanism. For example, kerberos authentication expects username@domain,
+                     NTLM expects domain\\username, and simple authentication can use a distinguished name,
+                     username@domain, or other formats based on your domain's settings.
+                     If not specified, anonymous authentication will be used. If specified, SIMPLE authentication
+                     will be used by default if authentication_mechanism is not specified.
+        :param password: The password to use when authenticating with the domain.
+                         If not specified, anonymous authentication will be used. If specified, SIMPLE authentication
+                         will be used by default if authentication_mechanism is not specified.
+        :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                         then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                         include all authentication mechanisms and SASL mechanisms from the ldap3
+                                         library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param kwargs: Additional keyword arguments can be specified for any of the arguments to an ldap3 Connection
+                       object and they will be used. This can be used to set things like `client_strategy` or
+                       `pool_name`.
+        :return: An ldap3 Connection object representing a connection with the domain.
+        """
         logger.info('Establishing connection with AD domain %s using LDAP authentication mechanism %s and user %s',
                     self.domain, authentication_mechanism, user)
         return self._create_connection(user, password, authentication_mechanism, **kwargs)
 
     def create_session_as_user(self, user: str = None, password: str = None, authentication_mechanism: str = None,
                                **kwargs) -> ADSession:
-        """ Create a session with AD domain authenticated as the specified user. """
+        """ Create a session with AD domain authenticated as the specified user.
+
+        :param user: The name of the user to use when authenticating with the domain. This should be formatted based
+                     on the authentication mechanism. For example, kerberos authentication expects username@domain,
+                     NTLM expects domain\\username, and simple authentication can use a distinguished name,
+                     username@domain, or other formats based on your domain's settings.
+                     If not specified, anonymous authentication will be used. If specified, SIMPLE authentication
+                     will be used by default if authentication_mechanism is not specified.
+        :param password: The password to use when authenticating with the domain.
+                         If not specified, anonymous authentication will be used. If specified, SIMPLE authentication
+                             will be used by default if authentication_mechanism is not specified.
+        :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                         then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                         include all authentication mechanisms and SASL mechanisms from the ldap3
+                                         library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param kwargs: Additional keyword arguments can be specified for any of the arguments to an ldap3 Connection
+                       object and they will be used. This can be used to set things like `client_strategy` or
+                       `pool_name`.
+        :return: An ADSession object representing a connection with the domain.
+        """
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and user %s',
                     self.domain, authentication_mechanism, user)
         conn = self._create_connection(user, password, authentication_mechanism, **kwargs)
@@ -824,6 +862,9 @@ class ADDomain:
                                          then the keyword argument `sasl_mechanism` must also be specified. Valid values
                                          include all authentication mechanisms and SASL mechanisms from the ldap3
                                          library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param kwargs: Additional keyword arguments can be specified for any of the arguments to an ldap3 Connection
+                       object and they will be used. This can be used to set things like `client_strategy` or
+                       `pool_name`.
         :returns: A Connection object representing a ldap connection with the domain.
         """
         logger.info(
@@ -860,6 +901,9 @@ class ADDomain:
                                          then the keyword argument `sasl_mechanism` must also be specified. Valid values
                                          include all authentication mechanisms and SASL mechanisms from the ldap3
                                          library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param kwargs: Additional keyword arguments can be specified for any of the arguments to an ldap3 Connection
+                       object and they will be used. This can be used to set things like `client_strategy` or
+                       `pool_name`.
         :returns: An ADSession object representing a connection with the domain.
         """
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and computer %s',
@@ -960,9 +1004,9 @@ class ADDomain:
                                               **additional_connection_attributes) -> ManagedADComputer:
         """ A super simple 'join the domain' function that requires minimal input - just admin user credentials
         to use in the join process.
-        Given those basic inputs, the domain's settings are used to establish a connection, and an account is made
-        with strong security settings. The account's attributes follow AD naming conventions based on the computer's
-        hostname by default.
+        Given those basic inputs, the domain's settings are used to establish a connection, and an account is taken over
+        based on inputs. The account's attributes are then read and used to generate kerberos keys and set other attributes
+        of the returned object.
         :param admin_username: The username of a user or computer with the rights to reset the password of the computer
                                being taken over.
                                This username should be formatted based on the authentication protocol being used.

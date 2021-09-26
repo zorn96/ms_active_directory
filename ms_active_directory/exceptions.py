@@ -36,26 +36,33 @@ class MsActiveDirectoryException(Exception):
 
 
 class AttributeModificationException(MsActiveDirectoryException):
+    """ An exception raised when an error is encountered modifying attributes of users, groups, etc. """
     def __init__(self, exception_str):
         super().__init__(exception_str)
 
 
 class DomainConnectException(MsActiveDirectoryException):
+    """ An exception raised when an error is encountered connecting to an AD Domain """
     def __init__(self, exception_str):
         super().__init__(exception_str)
 
 
 class DomainJoinException(MsActiveDirectoryException):
+    """ An exception raised when an error is encountered joining to an AD Domain or validating the join """
     def __init__(self, exception_str):
         super().__init__(exception_str)
 
 
 class DomainSearchException(MsActiveDirectoryException):
+    """ An exception raised when an error is encountered searching an AD Domain """
     def __init__(self, exception_str):
         super().__init__(exception_str)
 
 
 class DuplicateNameException(MsActiveDirectoryException):
+    """ An exception raised when multiple records are found during an operation that expects to operate on a
+    unique object
+    """
     def __init__(self, exception_str):
         super().__init__(exception_str)
 

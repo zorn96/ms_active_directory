@@ -1,4 +1,5 @@
-Help on class GssKerberosKey in module ms_active_directory.core.ad_kerberos_keys:
+``GssKerberosKey`` Objects
+--------------------------
 
 class GssKerberosKey(builtins.object)
  |  GssKerberosKey(principal: str, realm: str, raw_key: ms_active_directory.core.ad_kerberos_keys.RawKerberosKey, kvno: int, flags: int = None, timestamp: int = None, gss_name_type: int = 0, format_version: int = 2)
@@ -50,13 +51,3 @@ class GssKerberosKey(builtins.object)
  |      Sets the timestamp and clears complete_gss_keytab_bytes so we re-compute it
  |  
  |  uses_active_directory_supported_encryption_type(self)
- |  
- |  ----------------------------------------------------------------------
- |  Data descriptors defined here:
- |  
- |  __dict__
- |      dictionary for instance variables (if defined)
- |  
- |  __weakref__
- |      list of weak references to the object (if defined)
-

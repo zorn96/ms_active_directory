@@ -69,6 +69,17 @@ Documentation
 Documentation is available at https://ms-active-directory.readthedocs.io/. You can download a PDF copy of the manual at
 https://media.readthedocs.org/pdf/ms-active-directory/stable/ms-active-directory.pdf
 
+Documentation vs. Examples
+--------------------------
+
+If you're looking for examples of using the library, there's a good number of examples in the github repo's
+README file and the repo itself, which help to provide concrete demonstrations of how to use the functions
+documented here.
+
+The documentation is based on the docstrings in the repo and the type annotations in the repo, which
+means that it's incredibly detailed and thorough. A point of pride for this library is the complete type
+annotation of functions and highly descriptive docstrings for every user-facing function.
+
 
 Download
 --------
@@ -119,11 +130,27 @@ improve my skills in the Information and Communication technologies.
 
 
 Acknowledgements and Shout-outs
----------
+-------------------------------
 
-* **Ilya Etingof**, the author of the *pyasn1* package for his excellent work and support.
+* **Ilya Etingof**, the author of the ``pyasn1`` package for his excellent work and support.
 
 * **Giovanni Cannata** for his work on the ``ldap3`` package, which is where I got my start on learning about this
   area, and which is an integral part of this package.
 
 * **GitHub** for providing the *free source repository space and tools* used to develop this project.
+
+* **VMWare** for providing the free licenses used to run windows VMs for developing and testing this library.
+
+Documentation Contents
+----------------------
+
+.. toctree::
+   :maxdepth: 2
+
+   primary_object_index
+   info_object_index
+   exceptions
+   join_ad_domain
+   join_ad_domain_by_taking_over_existing_computer
+   join_ad_domain_using_session
+   join_ad_domain_by_taking_over_existing_computer_using_session

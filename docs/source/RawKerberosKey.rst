@@ -1,4 +1,5 @@
-Help on class RawKerberosKey in module ms_active_directory.core.ad_kerberos_keys:
+``RawKerberosKey`` Objects
+---------------------------
 
 class RawKerberosKey(builtins.object)
  |  RawKerberosKey(enc_type: Union[ms_active_directory.environment.security.security_config_constants.ADEncryptionType, str], key_bytes: bytes)

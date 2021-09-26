@@ -22,6 +22,17 @@ This library tries to conform to all Active Directory standard defaults in terms
 entity object classes, encryption types used, DNS names used for computers, etc.
 
 
+Documentation vs. Examples
+--------------------------
+
+If you're looking for examples of using the library, there's a good number of examples in the github repo's
+README file and the repo itself, which help to provide concrete demonstrations of how to use the functions
+documented here.
+
+The documentation here is based on the docstrings in the repo and the type annotations in the repo, which
+means that it's incredibly detailed and thorough. A point of pride for this library is the complete type
+annotation of functions and highly descriptive docstrings for every user-facing function.
+
 Contents
 --------
 
@@ -32,3 +43,7 @@ Contents
    primary_object_index
    info_object_index
    exceptions
+   join_ad_domain
+   join_ad_domain_by_taking_over_existing_computer
+   join_ad_domain_using_session
+   join_ad_domain_by_taking_over_existing_computer_using_session
