@@ -11,7 +11,7 @@ and all LDAP basic, NTLM, and SASL authentication mechanisms (e.g. Kerberos) sup
 `ldap3` python library.
 
 For more detailed documentation, please see the docs at:\
-https://ms-active-directory.readthedocs.io/
+**https://ms-active-directory.readthedocs.io/**
 
 **Author**: Azaria Zornberg
 \
