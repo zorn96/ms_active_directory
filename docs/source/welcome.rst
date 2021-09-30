@@ -149,9 +149,10 @@ Documentation Contents
 
    primary_object_index
    info_object_index
+   example_features
    exceptions
+   ad_password_string_to_key
    join_ad_domain
    join_ad_domain_by_taking_over_existing_computer
    join_ad_domain_using_session
    join_ad_domain_by_taking_over_existing_computer_using_session
-   example_features
