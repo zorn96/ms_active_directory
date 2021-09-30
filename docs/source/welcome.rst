@@ -154,3 +154,4 @@ Documentation Contents
    join_ad_domain_by_taking_over_existing_computer
    join_ad_domain_using_session
    join_ad_domain_by_taking_over_existing_computer_using_session
+   example_features

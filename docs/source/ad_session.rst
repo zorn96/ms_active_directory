@@ -1,5 +1,5 @@
 ``ADSession`` Objects
-______________________
+#######################
 
 
 Help for the class ``ADSession`` in module ``ms_active_directory.core.ad_session`` follows:

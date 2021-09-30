@@ -5,7 +5,7 @@ To join the local machine to an AD Domain, you can use an ``ADDomain`` object an
 function, but there's also a standalone function that can be imported from the library directly
 as::
 
-    >>> from ms_active_directory import join_ad_domain_by_taking_over_existing_computer
+    >>> from ms_active_directory import join_ad_domain
 
 This function can be used to have a 1-line call to join the machine to the domain by creating a new computer to
 represent it.

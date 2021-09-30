@@ -1,5 +1,5 @@
 ``ADDomain`` Objects
-____________________
+####################
 
 Help on the ``ADDomain`` from module ``ms_active_directory.core.ad_domain`` follows.
 
