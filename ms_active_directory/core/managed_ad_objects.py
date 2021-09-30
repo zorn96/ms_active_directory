@@ -1,3 +1,28 @@
+# Created in August 2021
+#
+# Author: Azaria Zornberg
+#
+# Copyright 2021 - 2021 Azaria Zornberg
+#
+# This file is part of ms_active_directory
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 from ms_active_directory import logging_utils
 
 from typing import List, TYPE_CHECKING
@@ -13,6 +38,9 @@ from ms_active_directory.environment.kerberos.kerberos_constants import (
 )
 from ms_active_directory.environment.kerberos.kerberos_keytab_generator import (
     write_gss_kerberos_key_list_to_raw_bytes
+)
+from ms_active_directory.environment.kerberos.kerberos_keytab_ingester import (
+    process_keytab_file_to_extract_entries
 )
 from ms_active_directory.environment.kerberos.kerberos_raw_key_generator import (
     ad_password_string_to_key
@@ -40,13 +68,13 @@ class ManagedADObject:
         self.location = location
         self.password = password
 
-    def get_domain(self):
+    def get_domain(self) -> 'ADDomain':
         return self.domain
 
-    def get_domain_dns_name(self):
+    def get_domain_dns_name(self) -> str:
         return self.domain_dns_name
 
-    def get_samaccount_name(self):
+    def get_samaccount_name(self) -> str:
         return self.samaccount_name
 
 
@@ -154,7 +182,7 @@ class ManagedADComputer(ManagedADObject):
             self.kerberos_keys.append(gss_kerberos_key)
             self.server_kerberos_keys.append(gss_kerberos_key)
 
-    def get_full_keytab_file_bytes_for_computer(self):
+    def get_full_keytab_file_bytes_for_computer(self) -> bytes:
         """ Get the raw bytes that would comprise a complete keytab file for this computer. The
         resultant bytes form a file that can be used to either accept GSS security contexts as a
         server for any protocol and hostname combinations defined in the service principal names,
@@ -163,24 +191,24 @@ class ManagedADComputer(ManagedADObject):
         """
         return write_gss_kerberos_key_list_to_raw_bytes(self.kerberos_keys)
 
-    def get_server_keytab_file_bytes_for_computer(self):
+    def get_server_keytab_file_bytes_for_computer(self) -> bytes:
         """ Get the raw bytes that would comprise a server keytab file for this computer. The resultant
         bytes form a file that can be used to accept GSS security contexts as a server for any protocol
         and hostname combinations defined in the service principal names.
         """
         return write_gss_kerberos_key_list_to_raw_bytes(self.server_kerberos_keys)
 
-    def get_user_keytab_file_bytes_for_computer(self):
+    def get_user_keytab_file_bytes_for_computer(self) -> bytes:
         """ Get the raw bytes that would comprise a server keytab file for this computer. The
         resultant bytes form a file that can be used to initiate GSS security contexts as the
         computer with the computer's user principal name being the sAMAccountName.
         """
         return write_gss_kerberos_key_list_to_raw_bytes(self.user_kerberos_keys)
 
-    def get_computer_name(self):
+    def get_computer_name(self) -> str:
         return self.computer_name
 
-    def get_computer_distinguished_name(self):
+    def get_computer_distinguished_name(self) -> str:
         """ Get the LDAP distinguished name for the computer. This raises an exception if location is not
         set for the computer.
         """
@@ -189,22 +217,22 @@ class ManagedADComputer(ManagedADObject):
                                                     'name cannot be determined for it.')
         return construct_object_distinguished_name(self.computer_name, self.location, self.domain_dns_name)
 
-    def get_encryption_types(self):
+    def get_encryption_types(self) -> List[ADEncryptionType]:
         return self.encryption_types
 
-    def get_name(self):
+    def get_name(self) -> str:
         return self.name
 
-    def get_server_kerberos_keys(self):
+    def get_server_kerberos_keys(self) -> List[GssKerberosKey]:
         return self.server_kerberos_keys
 
-    def get_service_principal_names(self):
+    def get_service_principal_names(self) -> List[str]:
         return self.service_principal_names
 
-    def get_user_kerberos_keys(self):
+    def get_user_kerberos_keys(self) -> List[GssKerberosKey]:
         return self.user_kerberos_keys
 
-    def get_user_principal_name(self):
+    def get_user_principal_name(self) -> str:
         """ Gets the user principal name for the computer, to be used in initiating GSS security contexts """
         return '{sam}@{realm}'.format(sam=self.samaccount_name, realm=self.realm)
 
@@ -301,28 +329,77 @@ class ManagedADComputer(ManagedADObject):
         logger.debug('Generated %s new kerberos keys for new service principal names %s set on computer %s locally',
                      len(new_kerberos_keys), service_principal_names, self.computer_name)
 
-    def write_full_keytab_file_for_computer(self, file_path: str):
+    def write_full_keytab_file_for_computer(self, file_path: str, merge_with_existing_file: bool = True):
+        """ Write all of the keytabs for this computer to a file, regardless of whether they represent keys for
+        the computer to authenticate with other servers as a client, or keys to authenticate clients when acting
+        as a server.
+
+        :param file_path: The path to the file where the keytabs will be written. If it does not exist, it will be
+                          created.
+        :param merge_with_existing_file: If True, the computers keytabs will be added into the keytab file at
+                                         `file_path` if one exists. If False, the file at `file_path` will be
+                                         overwritten if it exists. If the file does not exist, this does nothing.
+                                         Defaults to True.
+        """
         logger.debug('Writing full key file for computer %s to %s', self.computer_name, file_path)
-        data = self.get_full_keytab_file_bytes_for_computer()
+        entries_to_write = self.kerberos_keys
+        if merge_with_existing_file:
+            logger.debug('Merging with existing keytab file')
+            current_entries = process_keytab_file_to_extract_entries(file_path, must_exist=False)
+            logger.debug('%s existing keytabs found in file %s for merge', len(current_entries), file_path)
+            entries_to_write += current_entries
+        data = write_gss_kerberos_key_list_to_raw_bytes(entries_to_write)
         self._write_keytab_data(file_path, data)
         logger.info('Successfully wrote full key file with %s keys for computer %s to %s',
                     len(self.kerberos_keys), self.computer_name, file_path)
 
-    def write_server_keytab_file_for_computer(self, file_path: str):
+    def write_server_keytab_file_for_computer(self, file_path: str, merge_with_existing_file: bool = True):
+        """ Write all of the server keytabs for this computer to a file, which are the keys used to authenticate
+        clients when acting as a server.
+
+        :param file_path: The path to the file where the keytabs will be written. If it does not exist, it will be
+                          created.
+        :param merge_with_existing_file: If True, the computers keytabs will be added into the keytab file at
+                                         `file_path` if one exists. If False, the file at `file_path` will be
+                                         overwritten if it exists. If the file does not exist, this does nothing.
+                                         Defaults to True.
+        """
         logger.debug('Writing server key file for computer %s to %s', self.computer_name, file_path)
-        data = self.get_server_keytab_file_bytes_for_computer()
+        entries_to_write = self.server_kerberos_keys
+        if merge_with_existing_file:
+            logger.debug('Merging with existing keytab file')
+            current_entries = process_keytab_file_to_extract_entries(file_path, must_exist=False)
+            logger.debug('%s existing keytabs found in file %s for merge', len(current_entries), file_path)
+            entries_to_write += current_entries
+        data = write_gss_kerberos_key_list_to_raw_bytes(entries_to_write)
         self._write_keytab_data(file_path, data)
         logger.info('Successfully wrote server key file with %s keys for computer %s to %s',
                     len(self.server_kerberos_keys), self.computer_name, file_path)
 
-    def write_user_keytab_file_for_computer(self, file_path: str):
+    def write_user_keytab_file_for_computer(self, file_path: str, merge_with_existing_file: bool = True):
+        """ Write all of the user keytabs for this computer to a file, which are the keys used to authenticate
+        with other servers when acting as a client.
+
+        :param file_path: The path to the file where the keytabs will be written. If it does not exist, it will be
+                          created.
+        :param merge_with_existing_file: If True, the computers keytabs will be added into the keytab file at
+                                         `file_path` if one exists. If False, the file at `file_path` will be
+                                         overwritten if it exists. If the file does not exist, this does nothing.
+                                         Defaults to True.
+        """
         logger.debug('Writing user key file for computer %s to %s', self.computer_name, file_path)
-        data = self.get_user_keytab_file_bytes_for_computer()
+        entries_to_write = self.user_kerberos_keys
+        if merge_with_existing_file:
+            logger.debug('Merging with existing keytab file')
+            current_entries = process_keytab_file_to_extract_entries(file_path, must_exist=False)
+            logger.debug('%s existing keytabs found in file %s for merge', len(current_entries), file_path)
+            entries_to_write += current_entries
+        data = write_gss_kerberos_key_list_to_raw_bytes(entries_to_write)
         self._write_keytab_data(file_path, data)
         logger.info('Successfully wrote user key file with %s keys for computer %s to %s',
                     len(self.user_kerberos_keys), self.computer_name, file_path)
 
-    def _write_keytab_data(self, file_path, data):
+    def _write_keytab_data(self, file_path: str, data: bytes):
         with open(file_path, 'wb') as fp:
             fp.write(data)
 

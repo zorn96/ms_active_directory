@@ -3,6 +3,31 @@
 See this page for more info on the evolution of the format beyond the code comments explaining how things work
 conceptually: http://manpages.ubuntu.com/manpages/artful/man3/krb5_fileformats.3.html
 """
+# Created in August 2021
+#
+# Author: Azaria Zornberg
+#
+# Copyright 2021 - 2021 Azaria Zornberg
+#
+# This file is part of ms_active_directory
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import binascii
 import math
 import time
@@ -39,7 +64,8 @@ from ms_active_directory.exceptions import KeytabEncodingException
 logger = logging_utils.get_logger()
 
 
-def write_gss_kerberos_key_list_to_raw_bytes(gss_key_list: List['GssKerberosKey'], keytab_format_version: int = None):
+def write_gss_kerberos_key_list_to_raw_bytes(gss_key_list: List['GssKerberosKey'],
+                                             keytab_format_version: int = None) -> bytes:
     """ Given a list of fully formed keytab dictionaries, convert them to bytes representing all of them as a single
     keytab.
     This just builds upon the function to convert keytabs to hex, and then transforms the hex to bytes.
@@ -48,7 +74,8 @@ def write_gss_kerberos_key_list_to_raw_bytes(gss_key_list: List['GssKerberosKey'
     return binascii.unhexlify(hex_data)
 
 
-def write_gss_kerberos_key_list_to_raw_hex(gss_key_list: List['GssKerberosKey'], keytab_format_version: int = None):
+def write_gss_kerberos_key_list_to_raw_hex(gss_key_list: List['GssKerberosKey'],
+                                           keytab_format_version: int = None) -> str:
     """ Given a list of GssKerberosKey objects, convert them to a hex string representing all of them as a
     single kerberos keytab, usable for standard GSS authentication (either initiating or receiving).
     Optionally, a format version may be specified. If a format version is not provided, then all keytabs will be
@@ -82,7 +109,7 @@ def write_gss_kerberos_key_list_to_raw_hex(gss_key_list: List['GssKerberosKey'],
 
 def write_complete_keytab_structure_to_raw_bytes(gss_key: 'GssKerberosKey', keytab_format_version: int = None,
                                                  include_keytab_format_prefix: bool = True,
-                                                 use_current_time_for_keytab: bool = False):
+                                                 use_current_time_for_keytab: bool = False) -> bytes:
     """ This is just a wrapper around write_complete_keytab_structure_to_raw_hex_data - go read its docstring
     This takes the result of write_complete_keytab_structure_to_raw_hex_data and encodes it to bytes before
     returning.
@@ -95,7 +122,7 @@ def write_complete_keytab_structure_to_raw_bytes(gss_key: 'GssKerberosKey', keyt
 
 def write_complete_keytab_structure_to_raw_hex_data(gss_key: 'GssKerberosKey', keytab_format_version: int = None,
                                                     include_keytab_format_prefix: bool = True,
-                                                    use_current_time_for_keytab: bool = False):
+                                                    use_current_time_for_keytab: bool = False) -> str:
     """ This function, given a GssKerberosKey, will write it to bytes.
     Optionally, it can be forced into a specific keytab format version. If that isn't specified, then it will be
     written in the format version in the GssKerberosKey object.
@@ -219,7 +246,7 @@ def write_complete_keytab_structure_to_raw_hex_data(gss_key: 'GssKerberosKey', k
     return keytab_hex_lead + keytab_hex_body
 
 
-def _write_number_to_hex(number_to_write: int, number_repr_size_in_bytes: int, keytab_format_version: int):
+def _write_number_to_hex(number_to_write: int, number_repr_size_in_bytes: int, keytab_format_version: int) -> str:
     """ Write any number to hex, while allocating the number of bytes specified.
     Number fields in a keytab occupy a fixed size, so we make sure to account for that when encoding them to hex.
     """
@@ -233,7 +260,7 @@ def _write_number_to_hex(number_to_write: int, number_repr_size_in_bytes: int, k
     return number_to_write.to_bytes(number_repr_size_in_bytes, byte_order).hex()
 
 
-def _write_string_to_hex(string_to_write: str):
+def _write_string_to_hex(string_to_write: str) -> str:
     """ Write any string to hex.
     As mentioned above, numbers get padded because all numbers are a fixed size in keytabs.
     However, strings are super free-form, like principals and realms. They're not constrained to a fixed size ever, and
@@ -243,7 +270,8 @@ def _write_string_to_hex(string_to_write: str):
     return string_to_write.encode().hex()
 
 
-def _write_string_and_its_length_to_hex(any_string: str, size_of_length_field_bytes: int, keytab_format_version: int):
+def _write_string_and_its_length_to_hex(any_string: str, size_of_length_field_bytes: int,
+                                        keytab_format_version: int) -> str:
     """ Write any string, and the information needed to read it back from a keytab, to hex.
     This is done backwards - all strings are. We convert the string value to hex, then measure it's length after.
     Then we combine those in reverse - in the style 'string length hex | string hex' and return that so that when
@@ -257,18 +285,18 @@ def _write_string_and_its_length_to_hex(any_string: str, size_of_length_field_by
     return str_length_hex + _write_string_to_hex(any_string)
 
 
-def _write_realm_to_hex(realm: str, keytab_format_version: int):
+def _write_realm_to_hex(realm: str, keytab_format_version: int) -> str:
     """ Write our realm to hex. """
     return _write_string_and_its_length_to_hex(realm, REALM_LENGTH_FIELD_SIZE_BYTES, keytab_format_version)
 
 
-def _write_principal_component_to_hex(component: str, keytab_format_version: int):
+def _write_principal_component_to_hex(component: str, keytab_format_version: int) -> str:
     """ Write a principal component to hex. """
     return _write_string_and_its_length_to_hex(component, PRINCIPAL_COMPONENT_LENGTH_FIELD_SIZE_BYTES,
                                                keytab_format_version)
 
 
-def _write_principal_to_hex(principal: str, keytab_format_version: int):
+def _write_principal_to_hex(principal: str, keytab_format_version: int) -> str:
     """ Write a kerberos principal to hex.
     This means splitting up the components of the principal, the converting the components to hex, measuring each
     component's length in bytes and encoding that length, then concatenating them all and returning.
@@ -280,7 +308,7 @@ def _write_principal_to_hex(principal: str, keytab_format_version: int):
     return final_hex
 
 
-def _write_raw_kerberos_key_to_keytab_entry(raw_key: 'RawKerberosKey', keytab_format_version: int):
+def _write_raw_kerberos_key_to_keytab_entry(raw_key: 'RawKerberosKey', keytab_format_version: int) -> str:
     """ Prep our raw kerberos key for inclusion in a keytab entry.
     We can extract the hex from a RawKerberosKey object natively, so we just need to measure its length and then
     add that in front before returning so it can be read back like any other string.

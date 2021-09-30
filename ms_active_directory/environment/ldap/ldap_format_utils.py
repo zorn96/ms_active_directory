@@ -1,3 +1,28 @@
+# Created in August 2021
+#
+# Author: Azaria Zornberg
+#
+# Copyright 2021 - 2021 Azaria Zornberg
+#
+# This file is part of ms_active_directory
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import binascii
 import collections.abc
 import six
@@ -5,7 +30,7 @@ import six
 from ldap3 import Connection
 from ldap3.core.exceptions import LDAPInvalidDnError
 from ldap3.utils.dn import parse_dn
-from typing import List, Union
+from typing import Dict, List, Union
 
 from ms_active_directory import logging_utils
 from ms_active_directory.core.ad_objects import ADObject
@@ -24,7 +49,7 @@ from ms_active_directory.exceptions import (
 logger = logging_utils.get_logger()
 
 
-def is_dn(anything: str):
+def is_dn(anything: str) -> bool:
     """ Determine if a specified string is a distinguished name. """
     try:
         # our sessions all set check_names to the default value of True, so dns will be escaped
@@ -37,7 +62,7 @@ def is_dn(anything: str):
         return False
 
 
-def strip_domain_from_canonical_name(location: str, domain_dns_name: str):
+def strip_domain_from_canonical_name(location: str, domain_dns_name: str) -> str:
     """ Given a location that is not a relative distinguished name, normalize it by re,oving the domain
     dns name and leading / if necessary.
     """
@@ -56,7 +81,7 @@ def strip_domain_from_canonical_name(location: str, domain_dns_name: str):
     return location
 
 
-def convert_to_ldap_iterable(anything):
+def convert_to_ldap_iterable(anything) -> List:
     """ LDAP and the ldap3 library require that all attributes used in a modification operation be specified
     in a list. Even if the attribute is single-valued and reads as single-valued, like userAccountControl,
     modifying it still takes a [new_value].
@@ -72,14 +97,14 @@ def convert_to_ldap_iterable(anything):
     return [anything]
 
 
-def construct_default_hostnames_for_computer(computer_name: str, domain_dns_name: str):
+def construct_default_hostnames_for_computer(computer_name: str, domain_dns_name: str) -> List[str]:
     """ Construct the default hostnames for a computer in AD. The short hostname is the computer name capitalized,
     and the fqdn is lowercase of the computer name dot the domain.
     """
     return [computer_name.upper(), computer_name.lower() + '.' + domain_dns_name.lower()]
 
 
-def construct_object_distinguished_name(object_name: str, object_location: str, domain: str):
+def construct_object_distinguished_name(object_name: str, object_location: str, domain: str) -> str:
     """
     Constructs the distinguished name of a computer, group, or user given the name, join location, and domain.
     """
@@ -88,7 +113,7 @@ def construct_object_distinguished_name(object_name: str, object_location: str, 
     return ','.join([computer_part, object_location, domain_part])
 
 
-def construct_domain_from_ldap_base_dn(domain: str):
+def construct_domain_from_ldap_base_dn(domain: str) -> str:
     """
     Given a base DN, constructs the DNS name of the AD domain.
     """
@@ -99,7 +124,7 @@ def construct_domain_from_ldap_base_dn(domain: str):
     return '.'.join(domain_pieces)
 
 
-def construct_ldap_base_dn_from_domain(domain: str):
+def construct_ldap_base_dn_from_domain(domain: str) -> str:
     """
     Given a domain, constructs the base dn.
     """
@@ -107,7 +132,7 @@ def construct_ldap_base_dn_from_domain(domain: str):
     return ','.join(map(lambda x: 'DC=' + x, domain_split))
 
 
-def construct_service_principal_names(services: List[str], hostnames: List[str]):
+def construct_service_principal_names(services: List[str], hostnames: List[str]) -> List[str]:
     """ Given a list of services and hostnames, construct the kerberos server principle names for them. """
     spns = []
     for serv in services:
@@ -116,7 +141,7 @@ def construct_service_principal_names(services: List[str], hostnames: List[str])
     return spns
 
 
-def escape_generic_filter_value(anything: str):
+def escape_generic_filter_value(anything: str) -> str:
     """ Escape anything, so that it can be used in ldap queries without confusing the server.
     According to the LDAP spec, there's a set of common characters that need escaping:
     rfc4514 (https://tools.ietf.org/html/rfc4514).
@@ -144,7 +169,7 @@ def escape_generic_filter_value(anything: str):
     return "".join(escape_char(x) for x in anything)
 
 
-def escape_dn_for_filter(anything: str):
+def escape_dn_for_filter(anything: str) -> str:
     """Escape an LDAP distinguished name so that it can be used in filters without confusing the server.
     Distinguished names already have some special characters escaped or encoded, so we must use this
     function instead of the generic escape function, which would escape the existing escape sequences.
@@ -170,7 +195,7 @@ def escape_dn_for_filter(anything: str):
     return "".join(escape_char(x) for x in anything)
 
 
-def escape_bytestring_for_filter(byte_str: bytes):
+def escape_bytestring_for_filter(byte_str: bytes) -> str:
     """ Escape any bytestring (e.g. SIDs) for use in an LDAP filter.
     It will be converted to a hex string first and then escaped.
     If it is already a string, it will be escaped as if it were a hex string.
@@ -187,7 +212,7 @@ def escape_bytestring_for_filter(byte_str: bytes):
 
 
 def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], lookup_by_name_fn: callable, controls: List,
-                                     skip_validation=False):
+                                     skip_validation=False) -> Dict[str, Union[str, ADObject]]:
     """ Given a list of entities that might be AD objects or strings, return a map of LDAP distinguished names
     for the entities.
     """
@@ -220,7 +245,7 @@ def normalize_entities_to_entity_dns(entities: List[Union[str, ADObject]], looku
     return entity_dns
 
 
-def normalize_object_location_in_domain(location: str, domain_dns_name: str):
+def normalize_object_location_in_domain(location: str, domain_dns_name: str) -> str:
     """ There's two main formats we might see used for an object location - LDAP style and Windows Path style.
     For each style, they can be relative or fully qualified.
 
@@ -246,7 +271,7 @@ def normalize_object_location_in_domain(location: str, domain_dns_name: str):
 
 
 def process_ldap3_conn_return_value(ldap_connection: Connection, return_value: Union[tuple, bool],
-                                    paginated_response=False):
+                                    paginated_response=False) -> tuple:
     """ Thread-safe ldap3 connections return a tuple containing a boolean about success,
     the result, the response, and the request. Non-thread-safe ldap3 connections just
     leave the other fields and return a boolean when performing search/add/etc. and
@@ -268,7 +293,7 @@ def process_ldap3_conn_return_value(ldap_connection: Connection, return_value: U
     return success, result, response, req
 
 
-def remove_ad_search_refs(response: List[dict]):
+def remove_ad_search_refs(response: List[dict]) -> List[dict]:
     """ Many LDAP queries in Active Directory will include a number of generic search references
     to say 'maybe go look here for completeness'. This is especially common in setups where
     there's trusted domains or other domains in the same forest.
@@ -290,7 +315,7 @@ def remove_ad_search_refs(response: List[dict]):
     return real_entities
 
 
-def strip_domain_from_object_location(location: str, domain_dns_name: str):
+def strip_domain_from_object_location(location: str, domain_dns_name: str) -> str:
     """ Our object Location in a domain should be a relative distinguished name (RDN), but if someone specifies the full
     path, let's be forgiving.
     This is a normalizing function to convert to RDNs.
@@ -312,7 +337,7 @@ def strip_domain_from_object_location(location: str, domain_dns_name: str):
     return location
 
 
-def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bool):
+def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bool) -> str:
     """ Computer common names are sAMAccountNames without the $ at the end. So check for allowable
     characters and length limits.
     """

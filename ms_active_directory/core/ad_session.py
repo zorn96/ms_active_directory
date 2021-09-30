@@ -1,11 +1,37 @@
+""" A class defining a session with an AD domain and the functionality it offers. """
+
+# Created in August 2021
+#
+# Author: Azaria Zornberg
+#
+# Copyright 2021 - 2021 Azaria Zornberg
+#
+# This file is part of ms_active_directory
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import copy
 import re
 import socket
 import ssl
 import time
 
-from ms_active_directory import logging_utils
-
+from datetime import datetime
 from ldap3 import (
     BASE,
     Connection,
@@ -16,10 +42,10 @@ from ldap3 import (
     SUBTREE,
 )
 from ldap3.protocol.rfc4511 import Control
-from typing import List, Union, TYPE_CHECKING
+from typing import Dict, List, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ms_active_directory.core.ad_domain import ADDomain
+    from ms_active_directory.core.ad_domain import ADDomain, ADTrustedDomain
 
 import ms_active_directory.environment.constants as constants
 import ms_active_directory.environment.ldap.ldap_format_utils as ldap_utils
@@ -28,6 +54,7 @@ import ms_active_directory.environment.security.security_config_utils as securit
 import ms_active_directory.environment.security.security_config_constants as security_constants
 import ms_active_directory.environment.security.security_descriptor_utils as sd_utils
 
+from ms_active_directory import logging_utils
 from ms_active_directory.core.managed_ad_objects import ManagedADComputer
 from ms_active_directory.core.ad_objects import (
     ADComputer,
@@ -36,6 +63,7 @@ from ms_active_directory.core.ad_objects import (
     ADObject,
     cast_ad_object_to_specific_object_type,
 )
+from ms_active_directory.environment.constants import ADFunctionalLevel, ADVersion
 from ms_active_directory.environment.security.ad_security_guids import ADRightsGuid
 from ms_active_directory.exceptions import (
     AttributeModificationException,
@@ -96,23 +124,23 @@ class ADSession:
         self._trusted_domain_list_cache = []
         self._last_trusted_domain_query_time = None
 
-    def is_authenticated(self):
+    def is_authenticated(self) -> bool:
         """ Returns if the session is currently authenticated """
         return self.ldap_connection.bound
 
-    def is_encrypted(self):
+    def is_encrypted(self) -> bool:
         """ Returns if the session's connection is encrypted """
         return self.ldap_connection.tls_started or self.ldap_connection.server.ssl
 
-    def is_open(self):
+    def is_open(self) -> bool:
         """ Returns if the session's connection is currently open """
         return not self.ldap_connection.closed
 
-    def is_thread_safe(self):
+    def is_thread_safe(self) -> bool:
         """ Returns if the session's connection is thread-safe """
         return self.ldap_connection.strategy.thread_safe
 
-    def get_ldap_connection(self):
+    def get_ldap_connection(self) -> Connection:
         """ Returns the LDAP connection that this session uses for communication.
         This is particularly useful if a user wants to make complex LDAP queries or perform
         operations that are not supported by the ADSession object, and is willing to craft
@@ -120,19 +148,19 @@ class ADSession:
         """
         return self.ldap_connection
 
-    def get_current_server_uri(self):
+    def get_current_server_uri(self) -> str:
         """ Returns the URI of the server that this session is currently communicating with """
         return self.ldap_connection.server.name
 
-    def get_domain(self):
+    def get_domain(self) -> 'ADDomain':
         """ Returns the domain that this session is connected to """
         return self.domain
 
-    def get_domain_dns_name(self):
+    def get_domain_dns_name(self) -> str:
         """ Returns the domain that this session is connected to """
         return self.domain_dns_name
 
-    def get_domain_search_base(self):
+    def get_domain_search_base(self) -> str:
         """ Returns the LDAP search base used for all 'find' functions as the search base """
         return self.domain_search_base
 
@@ -150,19 +178,19 @@ class ADSession:
             search_base = normalized_rdn + ',' + self._domain_validation_search_base
         self.domain_search_base = search_base
 
-    def get_search_paging_size(self):
+    def get_search_paging_size(self) -> int:
         return self.search_paging_size
 
     def set_search_paging_size(self, new_size: int):
         self.search_paging_size = new_size
 
-    def get_trusted_domain_cache_lifetime_seconds(self):
+    def get_trusted_domain_cache_lifetime_seconds(self) -> int:
         return self.trusted_domain_cache_lifetime_seconds
 
     def set_trusted_domain_cache_lifetime_seconds(self, new_lifetime_in_seconds: int):
         self.trusted_domain_cache_lifetime_seconds = new_lifetime_in_seconds
 
-    def dn_exists_in_domain(self, distinguished_name: str):
+    def dn_exists_in_domain(self, distinguished_name: str) -> bool:
         """ Check if a distinguished name exists within the domain, regardless of what it is.
         :param distinguished_name: Either a relative distinguished name or full distinguished name
                                    to search for within the domain.
@@ -187,7 +215,7 @@ class ADSession:
                                         'issue. Raw result: {}'.format(distinguished_name, result))
         return exists
 
-    def object_exists_in_domain_with_attribute(self, attr: str, unescaped_value: str):
+    def object_exists_in_domain_with_attribute(self, attr: str, unescaped_value: str) -> bool:
         """ Check if any objects exist in the domain with a given attribute. Returns True if so, False otherwise.
         :param attr: The LDAP attribute to examine in the search.
         :param unescaped_value: The value of the attribute that we're looking for, in its raw form.
@@ -235,9 +263,9 @@ class ADSession:
                                                                                       result))
 
     def create_computer(self, computer_name: str, computer_location: str = None, computer_password: str = None,
-                        encryption_types: List[security_constants.ADEncryptionType] = None, hostnames: List[str] = None,
-                        services: List[str] = None, supports_legacy_behavior: bool = False,
-                        **additional_account_attributes):
+                        encryption_types: List[Union[str, security_constants.ADEncryptionType]] = None,
+                        hostnames: List[str] = None, services: List[str] = None, supports_legacy_behavior: bool = False,
+                        **additional_account_attributes) -> ManagedADComputer:
         """ Use the session to create a computer in the domain and return a computer object.
         :param computer_name: The common name of the computer to create in the AD domain. This
                               will be used to determine the sAMAccountName, and if no hostnames
@@ -380,7 +408,7 @@ class ADSession:
 
     def take_over_existing_computer(self, computer: Union[ManagedADComputer, ADObject, str],
                                     computer_password: str = None,
-                                    old_computer_password: str = None):
+                                    old_computer_password: str = None) -> ManagedADComputer:
         """ Use the session to take over a computer in the domain and return a computer object.
         This resets the computer's password so that nobody else can impersonate it, and reads
         the computer's attributes in order to create a computer object and return it.
@@ -517,7 +545,7 @@ class ADSession:
 
     # FUNCTIONS FOR FINDING DOMAIN INFORMATION
 
-    def is_domain_close_in_time_to_localhost(self, allowed_drift_seconds=None):
+    def is_domain_close_in_time_to_localhost(self, allowed_drift_seconds=None) -> bool:
         """ Get whether the domain time is close to the current local time.
         Just calls the parent domain function and returns that. This is included here for completeness.
         :param allowed_drift_seconds: The number of seconds considered "close", defaults to 5 minutes.
@@ -526,7 +554,8 @@ class ADSession:
         """
         return self.domain.is_close_in_time_to_localhost(self.ldap_connection, allowed_drift_seconds)
 
-    def find_certificate_authorities_for_domain(self, pem_format: bool = True, controls: List[Control] = None):
+    def find_certificate_authorities_for_domain(self, pem_format: bool = True,
+                                                controls: List[Control] = None) -> Union[List[str], List[bytes]]:
         """ Attempt to discover the CAs within the domain and return info on their certificates.
         If a session was first established using an IP address or blind trust TLS, but we want to bootstrap our
         sessions to establish stronger trust, or write the CA certificates to a local truststore for other
@@ -567,14 +596,14 @@ class ADSession:
             return [ssl.DER_cert_to_PEM_cert(cert_bytes) for cert_bytes in ca_certs_der_fmt]
         return ca_certs_der_fmt
 
-    def find_current_time_for_domain(self):
+    def find_current_time_for_domain(self) -> datetime:
         """ Get the current time for the domain as a datetime object.
         Just calls the parent domain function and returns that. This is included here for completeness.
         :returns: A datetime object representing the current time in the domain.
         """
         return self.domain.find_current_time(self.ldap_connection)
 
-    def find_dns_servers_for_domain(self, controls: List[Control] = None):
+    def find_dns_servers_for_domain(self, controls: List[Control] = None) -> Dict[str, str]:
         """ Attempt to discover the DNS servers within the domain and return info on them.
         If a session was first established using an IP address or blind trust TLS, but we want to bootstrap our
         sessions to use kerberos or TLS backed by CA certificates, we need proper DNS configured. For private
@@ -623,7 +652,7 @@ class ADSession:
             dns_results[hostname] = ip_addr
         return dns_results
 
-    def find_forest_schema_version(self):
+    def find_forest_schema_version(self) -> ADVersion:
         """ Attempt to determine the version of Windows Server set in the forest's schema.
         :returns: An Enum of type ADVersion indicating the schema version.
         """
@@ -644,7 +673,7 @@ class ADSession:
         ad_schema_ver = schema['attributes'][ldap_constants.AD_SCHEMA_VERSION]
         return constants.ADVersion.get_version_from_schema_number(ad_schema_ver)
 
-    def find_functional_level_for_domain(self):
+    def find_functional_level_for_domain(self) -> ADFunctionalLevel:
         """ Attempt to discover the functional level of the domain and return it.
         This will indicate if the domain is operating at the level of a 2008, 2012R2, 2016, etc. domain.
         The functional level of a domain influences what functionality exists (e.g. 2003 cannot issue AES keys,
@@ -654,7 +683,7 @@ class ADSession:
         """
         return self.domain.find_functional_level(self.ldap_connection)
 
-    def find_netbios_name_for_domain(self, force_refresh: bool = False):
+    def find_netbios_name_for_domain(self, force_refresh: bool = False) -> str:
         """ Find the netbios name for this domain. Renaming a domain is a huge task and is incredibly rare,
         so this information is cached when first read, and it only re-read if specifically requested.
 
@@ -665,7 +694,7 @@ class ADSession:
         return self.domain.find_netbios_name(self.ldap_connection, force_refresh)
         pass
 
-    def find_supported_sasl_mechanisms_for_domain(self):
+    def find_supported_sasl_mechanisms_for_domain(self) -> List[str]:
         """ Attempt to discover the SASL mechanisms supported by the domain and return them.
         This just builds upon the functionality that the domain has for this, as you don't need
         to be authenticated as anything other than anonymous to read this information (since it's
@@ -676,7 +705,7 @@ class ADSession:
         """
         return self.domain.find_supported_sasl_mechanisms(self.ldap_connection)
 
-    def find_trusted_domains_for_domain(self, force_cache_refresh=False):
+    def find_trusted_domains_for_domain(self, force_cache_refresh=False) -> List['ADTrustedDomain']:
         """ Find the trusted domains for this domain.
         If we have cached trusted domains for this session's domain, and the cache is still valid based on our
         cache lifetime, return that.
@@ -755,7 +784,8 @@ class ADSession:
 
     def find_objects_with_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str] = None,
                                     size_limit: int = 0, object_class: str = None, return_type=None,
-                                    controls: List[Control] = None):
+                                    controls: List[Control] = None) -> List[Union[ADUser, ADComputer, ADObject,
+                                                                                  ADGroup]]:
         """ Find all AD objects that possess the specified attribute with the specified value and return them.
 
         :param attribute_name: The LDAP name of the attribute to be used in the search.
@@ -803,7 +833,7 @@ class ADSession:
         return res
 
     def find_groups_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str] = None,
-                                 size_limit: int = 0, controls: List[Control] = None):
+                                 size_limit: int = 0, controls: List[Control] = None) -> List[ADGroup]:
         """ Find all groups that possess the specified attribute with the specified value, and return a list of ADGroup
         objects.
 
@@ -822,7 +852,7 @@ class ADSession:
                                                 ldap_constants.GROUP_OBJECT_CLASS, ADGroup, controls)
 
     def find_groups_by_common_name(self, group_name: str, attributes_to_lookup: List[str] = None,
-                                   controls: List[Control] = None):
+                                   controls: List[Control] = None) -> List[ADGroup]:
         """ Find all groups with a given common name and return a list of ADGroup objects.
         This is particularly useful when you have multiple groups with the same name in different OUs
         as a result of a migration, and want to find them so you can combine them.
@@ -846,7 +876,7 @@ class ADSession:
         return res
 
     def find_group_by_distinguished_name(self, group_dn: str, attributes_to_lookup: List[str] = None,
-                                         controls: List[Control] = None):
+                                         controls: List[Control] = None) -> Optional[ADGroup]:
         """ Find a group in AD based on a specified distinguished name and return it along with any
         requested attributes.
         :param group_dn: The distinguished name of the group.
@@ -869,7 +899,7 @@ class ADSession:
         return res[0]
 
     def find_group_by_sam_name(self, group_name: str, attributes_to_lookup: List[str] = None,
-                               controls: List[Control] = None):
+                               controls: List[Control] = None) -> Optional[ADGroup]:
         """ Find a Group in AD based on a specified sAMAccountName name and return it along with any
         requested attributes.
         :param group_name: The sAMAccountName name of the group.
@@ -892,7 +922,7 @@ class ADSession:
         return res[0]
 
     def find_group_by_sid(self, group_sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
-                          attributes_to_lookup: List[str] = None, controls: List[Control] = None):
+                          attributes_to_lookup: List[str] = None, controls: List[Control] = None) -> Optional[ADGroup]:
         """ Find a Group in AD given its SID.
         This function takes in a group's objectSID and then looks up the group in AD using it. SIDs are unique
         so only a single entry can be found at most.
@@ -911,7 +941,7 @@ class ADSession:
                                        return_type=ADGroup, controls=controls)
 
     def find_group_by_name(self, group_name: str, attributes_to_lookup: List[str] = None,
-                           controls: List[Control] = None):
+                           controls: List[Control] = None) -> Optional[ADGroup]:
         """ Find a Group in AD based on a provided name.
         This function takes in a generic name which can be either a distinguished name, a common name, or a
         sAMAccountName, and tries to find a unique group identified by it and return information on the group.
@@ -928,7 +958,8 @@ class ADSession:
 
     def find_object_by_sid(self, sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
                            attributes_to_lookup: List[str] = None, object_class: str = None,
-                           return_type=None, controls: List[Control] = None):
+                           return_type=None, controls: List[Control] = None) -> Optional[Union[ADObject, ADUser,
+                                                                                               ADGroup, ADComputer]]:
         """ Find any object in AD given its SID.
         This function takes in a user's objectSID and then looks up the user in AD using it. SIDs are unique
         so only a single entry can be found at most.
@@ -973,11 +1004,12 @@ class ADSession:
         results = self.find_objects_with_attribute(ldap_constants.AD_ATTRIBUTE_OBJECT_SID, sid_bytes,
                                                    attributes_to_lookup, 1, object_class, return_type, controls)
         if results:
-            return results[0]
+            return cast_ad_object_to_specific_object_type(results[0])
         return None
 
     def find_object_by_canonical_name(self, canonical_name: str, attributes_to_lookup: List[str] = None,
-                                      controls: List[Control] = None):
+                                      controls: List[Control] = None) -> Optional[Union[ADObject, ADUser, ADGroup,
+                                                                                        ADComputer]]:
         """ Find an object in the domain using a canonical name, also called a 'windows path style' name.
 
         :param canonical_name: A windows path style name representing an object in the domain. This may be either a
@@ -1027,7 +1059,8 @@ class ADSession:
         return cast_ad_object_to_specific_object_type(ad_obj)
 
     def find_object_by_distinguished_name(self, distinguished_name: str, attributes_to_lookup: List[str] = None,
-                                          controls: List[Control] = None):
+                                          controls: List[Control] = None) -> Optional[Union[ADObject, ADUser, ADGroup,
+                                                                                            ADComputer]]:
         """ Find an object in the domain using a relative distinguished name or full distinguished name.
 
         :param distinguished_name: A relative or absolute distinguished name within the domain to look up.
@@ -1054,7 +1087,7 @@ class ADSession:
         return cast_ad_object_to_specific_object_type(ad_obj)
 
     def find_computers_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str] = None,
-                                    size_limit: int = 0, controls: List[Control] = None):
+                                    size_limit: int = 0, controls: List[Control] = None) -> List[ADComputer]:
         """ Find all computers that possess the specified attribute with the specified value, and return a list of
         ADComputer objects.
 
@@ -1073,8 +1106,8 @@ class ADSession:
         return self.find_objects_with_attribute(attribute_name, attribute_value, attributes_to_lookup, size_limit,
                                                 ldap_constants.COMPUTER_OBJECT_CLASS, ADComputer, controls)
 
-    def find_computer_by_common_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
-                                     controls: List[Control] = None):
+    def find_computers_by_common_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
+                                      controls: List[Control] = None) -> List[ADComputer]:
         """ Find all computers with a given common name and return a list of ADComputer objects.
         This is particularly useful when you have multiple computers with the same name in different OUs
         as a result of a migration, and want to find them so you can combine them.
@@ -1098,7 +1131,7 @@ class ADSession:
         return res
 
     def find_computer_by_distinguished_name(self, computer_dn: str, attributes_to_lookup: List[str] = None,
-                                            controls: List[Control] = None):
+                                            controls: List[Control] = None) -> Optional[ADComputer]:
         """ Find a Computer in AD based on a specified distinguished name and return it along with any
         requested attributes.
         :param computer_dn: The distinguished name of the computer.
@@ -1121,7 +1154,7 @@ class ADSession:
         return res[0]
 
     def find_computer_by_sam_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
-                                  controls: List[Control] = None):
+                                  controls: List[Control] = None) -> Optional[ADComputer]:
         """ Find a Computer in AD based on a specified sAMAccountName name and return it along with any
         requested attributes.
         :param computer_name: The sAMAccountName name of the computer. Because a lot of people get a bit confused on
@@ -1161,7 +1194,8 @@ class ADSession:
         return res[0]
 
     def find_computer_by_sid(self, computer_sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
-                             attributes_to_lookup: List[str] = None, controls: List[Control] = None):
+                             attributes_to_lookup: List[str] = None,
+                             controls: List[Control] = None) -> Optional[ADComputer]:
         """ Find a Computer in AD given its SID.
         This function takes in a computer's objectSID and then looks up the computer in AD using it. SIDs are unique
         so only a single entry can be found at most.
@@ -1182,7 +1216,7 @@ class ADSession:
                                        controls=controls)
 
     def find_computer_by_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
-                              controls: List[Control] = None):
+                              controls: List[Control] = None) -> Optional[ADComputer]:
         """ Find a Computer in AD based on a provided name.
         This function takes in a generic name which can be either a distinguished name, a common name, or a
         sAMAccountName, and tries to find a unique computer identified by it and return information on the computer.
@@ -1198,7 +1232,7 @@ class ADSession:
         return self._find_by_name_common(computer_name, attributes_to_lookup, ADComputer, controls=controls)
 
     def find_users_by_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str] = None,
-                                size_limit: int = 0, controls: List[Control] = None):
+                                size_limit: int = 0, controls: List[Control] = None) -> List[ADUser]:
         """ Find all users that possess the specified attribute with the specified value, and return a list of ADUser
         objects.
 
@@ -1217,7 +1251,7 @@ class ADSession:
                                                 ldap_constants.USER_OBJECT_CLASS, ADUser, controls)
 
     def find_users_by_common_name(self, user_name: str, attributes_to_lookup: List[str] = None,
-                                  controls: List[Control] = None):
+                                  controls: List[Control] = None) -> List[ADUser]:
         """ Find all users with a given common name and return a list of ADUser objects.
         This is particularly useful when you have multiple users with the same name in different OUs
         as a result of a migration, and want to find them so you can combine them.
@@ -1241,7 +1275,7 @@ class ADSession:
         return res
 
     def find_user_by_distinguished_name(self, user_dn: str, attributes_to_lookup: List[str] = None,
-                                        controls: List[Control] = None):
+                                        controls: List[Control] = None) -> Optional[ADUser]:
         """ Find a User in AD based on a specified distinguished name and return it along with any
         requested attributes.
         :param user_dn: The distinguished name of the user.
@@ -1264,7 +1298,7 @@ class ADSession:
         return res[0]
 
     def find_user_by_sam_name(self, user_name: str, attributes_to_lookup: List[str] = None,
-                              controls: List[Control] = None):
+                              controls: List[Control] = None) -> Optional[ADUser]:
         """ Find a User in AD based on a specified sAMAccountName name and return it along with any
         requested attributes.
         :param user_name: The sAMAccountName name of the user.
@@ -1287,7 +1321,7 @@ class ADSession:
         return res[0]
 
     def find_user_by_sid(self, user_sid: Union[security_constants.WellKnownSID, str, sd_utils.ObjectSid],
-                         attributes_to_lookup: List[str] = None, controls: List[Control] = None):
+                         attributes_to_lookup: List[str] = None, controls: List[Control] = None) -> Optional[ADUser]:
         """ Find a User in AD given its SID.
         This function takes in a user's objectSID and then looks up the user in AD using it. SIDs are unique
         so only a single entry can be found at most.
@@ -1306,7 +1340,7 @@ class ADSession:
                                        return_type=ADUser, controls=controls)
 
     def find_user_by_name(self, user_name: str, attributes_to_lookup: List[str] = None,
-                          controls: List[Control] = None):
+                          controls: List[Control] = None) -> Optional[ADUser]:
         """ Find a User in AD based on a provided name.
         This function takes in a generic name which can be either a distinguished name, a common name, or a
         sAMAccountName, and tries to find a unique user identified by it and return information on the user.
@@ -1340,7 +1374,7 @@ class ADSession:
         elif lookup_type is ADComputer:
             dn_lookup_func = self.find_computer_by_distinguished_name
             sam_lookup_func = self.find_computer_by_sam_name
-            cn_lookup_func = self.find_computer_by_common_name
+            cn_lookup_func = self.find_computers_by_common_name
 
         if is_dn:
             return dn_lookup_func(name, attributes_to_lookup, controls=controls)
@@ -1381,7 +1415,7 @@ class ADSession:
 
     def find_groups_for_entities(self, entities: List[Union[str, ADObject]], attributes_to_lookup: List[str] = None,
                                  lookup_by_name_fn: callable = None, controls: List[Control] = None,
-                                 skip_validation: bool = False):
+                                 skip_validation: bool = False) -> Dict[Union[str, ADObject], List[ADGroup]]:
         """ Find the parent groups for all of the entities in a List.
         These entities may be users, groups, or anything really because Active Directory uses the "groupOfNames" style
         membership tracking, so all group members are just represented as distinguished names regardless of type.
@@ -1466,7 +1500,7 @@ class ADSession:
         return mapping_dict
 
     def find_groups_for_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
-                              controls: List[Control] = None, skip_validation: bool = False):
+                              controls: List[Control] = None, skip_validation: bool = False) -> List[ADGroup]:
         """ Find the groups that a group belongs to, look up attributes of theirs, and return information about them.
 
         :param group: The group to lookup group memberships for. This can either be an ADGroup or a string name of an
@@ -1489,7 +1523,8 @@ class ADSession:
         return result_dict[group]
 
     def find_groups_for_groups(self, groups: List[Union[str, ADGroup]], attributes_to_lookup: List[str] = None,
-                               controls: List[Control] = None, skip_validation: bool = False):
+                               controls: List[Control] = None,
+                               skip_validation: bool = False) -> Dict[Union[str, ADGroup], List[ADGroup]]:
         """ Find the groups that a list of groups belong to, look up attributes of theirs, and return information about
         them.
 
@@ -1512,7 +1547,7 @@ class ADSession:
                                              skip_validation=skip_validation)
 
     def find_groups_for_user(self, user: Union[str, ADUser], attributes_to_lookup: List[str] = None,
-                             controls: List[Control] = None, skip_validation: bool = False):
+                             controls: List[Control] = None, skip_validation: bool = False) -> List[ADGroup]:
         """ Find the groups that a user belongs to, look up attributes of theirs, and return information about them.
 
         :param user: The user to lookup group memberships for. This can either be an ADUser or a string name of an
@@ -1535,7 +1570,8 @@ class ADSession:
         return result_dict[user]
 
     def find_groups_for_users(self, users: List[Union[str, ADUser]], attributes_to_lookup: List[str] = None,
-                              controls: List[Control] = None, skip_validation: bool = False):
+                              controls: List[Control] = None,
+                              skip_validation: bool = False) -> Dict[Union[str, ADUser], List[ADGroup]]:
         """ Find the groups that a list of users belong to, look up attributes of theirs, and return information about
         them.
 
@@ -1558,7 +1594,7 @@ class ADSession:
                                              skip_validation=skip_validation)
 
     def find_groups_for_computer(self, computer: Union[str, ADComputer], attributes_to_lookup: List[str] = None,
-                                 controls: List[Control] = None, skip_validation: bool = False):
+                                 controls: List[Control] = None, skip_validation: bool = False) -> List[ADGroup]:
         """ Find the groups that a computer belongs to, look up attributes of theirs, and return information about them.
 
         :param computer: The computer to lookup group memberships for. This can either be an ADComputer or a string
@@ -1581,7 +1617,8 @@ class ADSession:
         return result_dict[computer]
 
     def find_groups_for_computers(self, computers: List[Union[str, ADComputer]], attributes_to_lookup: List[str] = None,
-                                  controls: List[Control] = None, skip_validation: bool = False):
+                                  controls: List[Control] = None,
+                                  skip_validation: bool = False) -> Dict[Union[str, ADComputer], List[ADGroup]]:
         """ Find the groups that a list of computers belong to, look up attributes of theirs, and return information
         about them.
 
@@ -1604,7 +1641,8 @@ class ADSession:
                                              skip_validation=skip_validation)
 
     def find_members_of_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
-                              controls: List[Control] = None, skip_validation: bool = False):
+                              controls: List[Control] = None,
+                              skip_validation: bool = False) -> List[Union[ADUser, ADGroup, ADComputer, ADObject]]:
         """ Find the members of a group in the domain, along with attributes of the members.
 
         :param group: Either a string name of a group or ADGroup to look up the members of.
@@ -1629,7 +1667,10 @@ class ADSession:
         return single_map[group]
 
     def find_members_of_groups(self, groups: List[Union[str, ADGroup]], attributes_to_lookup: List[str] = None,
-                               controls: List[Control] = None, skip_validation: bool = False):
+                               controls: List[Control] = None,
+                               skip_validation: bool = False) -> Dict[Union[str, ADGroup],
+                                                                      List[Union[ADUser, ADGroup,
+                                                                                 ADComputer, ADObject]]]:
         """ Find the members of one or more groups in the domain, along with attributes of the members.
 
         :param groups: A list of either strings or ADGroups to look up the members of.
@@ -1701,7 +1742,8 @@ class ADSession:
 
     def find_members_of_group_recursive(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
                                         controls: List[Control] = None, skip_validation: bool = False,
-                                        maximum_nesting_depth: int = None, flatten: bool = False):
+                                        maximum_nesting_depth: int = None,
+                                        flatten: bool = False) -> List[Dict[Union[str, ADGroup], List[ADGroup]]]:
         """ Find the members of a group in the domain, along with attributes of the members.
 
         :param group: Either a string name of a group or ADGroup to look up the members of.
@@ -1752,7 +1794,8 @@ class ADSession:
 
     def find_members_of_groups_recursive(self, groups: List[Union[str, ADGroup]], attributes_to_lookup: List[str] = None,
                                          controls: List[Control] = None, skip_validation: bool = False,
-                                         maximum_nesting_depth: int = None):
+                                         maximum_nesting_depth: int = None) -> List[Dict[Union[str, ADGroup],
+                                                                                         List[ADGroup]]]:
         """ Find the members of a group in the domain, along with attributes of the members.
 
         :param groups: Either a string name of a group or ADGroup to look up the members of.
@@ -1802,7 +1845,8 @@ class ADSession:
     def _something_members_to_or_from_groups(self, members: List[Union[str, ADObject]],
                                              groups_to_modify: List[Union[str, ADGroup]],
                                              member_lookup_fn: callable, stop_and_rollback_on_error: bool,
-                                             adding: bool, controls: List[Control], skip_validation: bool):
+                                             adding: bool, controls: List[Control],
+                                             skip_validation: bool) -> List[Union[str, ADGroup]]:
         """ Either add or remove members to/from groups. Members may be users or groups or string distinguished names.
         If there are any failures adding/removing for a group, and stop_and_rollback_on_error is True, we will attempt
         to undo the changes that have been done. If rollback fails, we will raise an exception. If it succeeds, we still
@@ -1890,7 +1934,7 @@ class ADSession:
     def add_groups_to_groups(self, groups_to_add: List[Union[str, ADGroup]],
                              groups_to_add_them_to: List[Union[str, ADGroup]],
                              stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                             skip_validation: bool = False):
+                             skip_validation: bool = False) -> List[Union[str, ADGroup]]:
         """ Add one or more groups to one or more other groups as members. This function attempts to be idempotent
         and will not re-add groups that are already members.
 
@@ -1923,7 +1967,7 @@ class ADSession:
     def add_users_to_groups(self, users_to_add: List[Union[str, ADUser]],
                             groups_to_add_them_to: List[Union[str, ADGroup]],
                             stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                            skip_validation: bool = False):
+                            skip_validation: bool = False) -> List[Union[str, ADGroup]]:
         """ Add one or more users to one or more groups as members. This function attempts to be idempotent
         and will not re-add users that are already members.
 
@@ -1955,7 +1999,7 @@ class ADSession:
     def add_computers_to_groups(self, computers_to_add: List[Union[str, ADComputer]],
                                 groups_to_add_them_to: List[Union[str, ADGroup]],
                                 stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                                skip_validation: bool = False):
+                                skip_validation: bool = False) -> List[Union[str, ADGroup]]:
         """ Add one or more computers to one or more groups as members. This function attempts to be idempotent
         and will not re-add computers that are already members.
 
@@ -1988,7 +2032,7 @@ class ADSession:
     def remove_groups_from_groups(self, groups_to_remove: List[Union[str, ADGroup]],
                                   groups_to_remove_them_from: List[Union[str, ADGroup]],
                                   stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                                  skip_validation: bool = False):
+                                  skip_validation: bool = False) -> List[Union[str, ADGroup]]:
         """ Remove one or more groups from one or more groups as members. This function attempts to be idempotent
         and will not remove groups that are not already members.
 
@@ -2021,7 +2065,7 @@ class ADSession:
     def remove_users_from_groups(self, users_to_remove: List[Union[str, ADUser]],
                                  groups_to_remove_them_from: List[Union[str, ADGroup]],
                                  stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                                 skip_validation: bool = False):
+                                 skip_validation: bool = False) -> List[Union[str, ADGroup]]:
         """ Remove one or more users from one or more groups as members. This function attempts to be idempotent
         and will not remove users that are not already members.
 
@@ -2054,7 +2098,7 @@ class ADSession:
     def remove_computers_from_groups(self, computers_to_remove: List[Union[str, ADComputer]],
                                      groups_to_remove_them_from: List[Union[str, ADGroup]],
                                      stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                                     skip_validation: bool = False):
+                                     skip_validation: bool = False) -> List[Union[str, ADGroup]]:
         """ Remove one or more computers from one or more groups as members. This function attempts to be idempotent
         and will not remove computers that are not already members.
 
@@ -2087,7 +2131,7 @@ class ADSession:
     # Functions for managing permissions within the domain
 
     def find_security_descriptor_for_group(self, group: Union[str, ADGroup], include_sacl: bool = False,
-                                           skip_validation: bool = False):
+                                           skip_validation: bool = False) -> sd_utils.SelfRelativeSecurityDescriptor:
         """ Given a group, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -2110,7 +2154,7 @@ class ADSession:
                                                         skip_validation=skip_validation)
 
     def find_security_descriptor_for_user(self, user: Union[str, ADUser], include_sacl: bool = False,
-                                          skip_validation: bool = False):
+                                          skip_validation: bool = False) -> sd_utils.SelfRelativeSecurityDescriptor:
         """ Given a user, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -2133,7 +2177,7 @@ class ADSession:
                                                         skip_validation=skip_validation)
 
     def find_security_descriptor_for_computer(self, computer: Union[str, ADComputer], include_sacl: bool = False,
-                                              skip_validation: bool = False):
+                                              skip_validation: bool = False) -> sd_utils.SelfRelativeSecurityDescriptor:
         """ Given a computer, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -2156,7 +2200,7 @@ class ADSession:
                                                         skip_validation=skip_validation)
 
     def find_security_descriptor_for_object(self, ad_object: Union[str, ADObject], include_sacl: bool = False,
-                                            skip_validation: bool = False):
+                                            skip_validation: bool = False) -> sd_utils.SelfRelativeSecurityDescriptor:
         """ Given an object, find its security descriptor. The security descriptor will be returned as a
         SelfRelativeSecurityDescriptor object.
 
@@ -2197,7 +2241,8 @@ class ADSession:
 
     def set_object_security_descriptor(self, ad_object: Union[str, ADObject],
                                        new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                       raise_exception_on_failure: bool = True, skip_validation: bool = False):
+                                       raise_exception_on_failure: bool = True,
+                                       skip_validation: bool = False) -> bool:
         """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
         object in AD, change its permission ACEs, etc.
 
@@ -2233,7 +2278,7 @@ class ADSession:
 
     def set_group_security_descriptor(self, group: Union[str, ADGroup],
                                       new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                      raise_exception_on_failure: bool = True, skip_validation: bool = False):
+                                      raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool:
         """ Set the security descriptor on an Active Directory group. This can be used to change the owner of an
         group in AD, change its permission ACEs, etc.
 
@@ -2257,7 +2302,7 @@ class ADSession:
 
     def set_user_security_descriptor(self, user: Union[str, ADUser],
                                      new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
-                                     raise_exception_on_failure: bool = True, skip_validation: bool = False):
+                                     raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool:
         """ Set the security descriptor on an Active Directory object. This can be used to change the owner of an
         user in AD, change its permission ACEs, etc.
 
@@ -2283,7 +2328,7 @@ class ADSession:
     def set_computer_security_descriptor(self, computer: Union[str, ADComputer],
                                          new_sec_descriptor: sd_utils.SelfRelativeSecurityDescriptor,
                                          raise_exception_on_failure: bool = True,
-                                         skip_validation: bool = False):
+                                         skip_validation: bool = False) -> bool:
         """ Set the security descriptor on an Active Directory computer. This can be used to change the owner of a
         computer in AD, change its permission ACEs, etc.
 
@@ -2314,7 +2359,7 @@ class ADSession:
                                                      read_property_guids_to_add: List[str] = None,
                                                      write_property_guids_to_add: List[str] = None,
                                                      raise_exception_on_failure: bool = True,
-                                                     skip_validation: bool = False):
+                                                     skip_validation: bool = False) -> bool:
         """ Add specified permissions to the security descriptor on an object for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the object, via adding access masks or rights guids respectively. It can also give
@@ -2400,7 +2445,7 @@ class ADSession:
                                                     read_property_guids_to_add: List[str] = None,
                                                     write_property_guids_to_add: List[str] = None,
                                                     raise_exception_on_failure: bool = True,
-                                                    skip_validation: bool = False):
+                                                    skip_validation: bool = False) -> bool:
         """ Add specified permissions to the security descriptor on a group for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the group, via adding access masks or rights guids respectively. It can also give
@@ -2456,7 +2501,7 @@ class ADSession:
                                                    read_property_guids_to_add: List[str] = None,
                                                    write_property_guids_to_add: List[str] = None,
                                                    raise_exception_on_failure: bool = True,
-                                                   skip_validation: bool = False):
+                                                   skip_validation: bool = False) -> bool:
         """ Add specified permissions to the security descriptor on a user for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the user, via adding access masks or rights guids respectively. It can also give
@@ -2512,7 +2557,7 @@ class ADSession:
                                                        read_property_guids_to_add: List[str] = None,
                                                        write_property_guids_to_add: List[str] = None,
                                                        raise_exception_on_failure: bool = True,
-                                                       skip_validation: bool = False):
+                                                       skip_validation: bool = False) -> bool:
         """ Add specified permissions to the security descriptor on a computer for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the computer, via adding access masks or rights guids respectively. It can also give
@@ -2563,7 +2608,7 @@ class ADSession:
     # Various account management functionalities
 
     def change_password_for_account(self, account: Union[str, ADUser, ADComputer], new_password: str,
-                                    current_password: str, skip_validation: bool = False):
+                                    current_password: str, skip_validation: bool = False) -> bool:
         """ Change a password for a user (includes computers) given the new desired password and old desired password.
         When a password is changed, the old password is provided along with the new one, and this significantly reduces
         the permissions needed in order to perform the operation. By default, any user can perform CHANGE_PASSWORD for
@@ -2589,7 +2634,7 @@ class ADSession:
         return self.ldap_connection.extend.microsoft.modify_password(account_dn, new_password, current_password)
 
     def reset_password_for_account(self, account: Union[str, ADUser, ADComputer], new_password: str,
-                                   skip_validation: bool = False):
+                                   skip_validation: bool = False) -> bool:
         """ Resets a password for a user (includes computers) to a new desired password.
         To reset a password, a new password is provided to replace the current one without providing the current
         password. This is a privileged operation and maps to the RESET_PASSWORD permission in AD.
@@ -2607,7 +2652,7 @@ class ADSession:
         """
         return self.change_password_for_account(account, new_password, None, skip_validation=skip_validation)
 
-    def disable_account(self, account: Union[str, ADUser, ADComputer]):
+    def disable_account(self, account: Union[str, ADUser, ADComputer]) -> bool:
         """ Disable a user account.
         :param account: The string name of the user/computer account to disable. This may either be a
                         sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
@@ -2650,7 +2695,7 @@ class ADSession:
             logger.debug('Result of modifying user account control to disable %s: %s', account_dn, result)
         return success
 
-    def enable_account(self, account: Union[str, ADComputer, ADUser]):
+    def enable_account(self, account: Union[str, ADComputer, ADUser]) -> bool:
         """ Enable a user account.
         :param account: The string name of the user/computer account to enable. This may either be a
                         sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
@@ -2693,7 +2738,7 @@ class ADSession:
             logger.debug('Result of modifying user account control to disable %s: %s', account_dn, result)
         return success
 
-    def unlock_account(self, account: Union[str, ADComputer, ADUser], skip_validation: bool = False):
+    def unlock_account(self, account: Union[str, ADComputer, ADUser], skip_validation: bool = False) -> bool:
         """ Unlock a user who's been locked out for some period of time.
         :param account: The string name of the user/computer account that has been locked out. This may either be a
                         sAMAccountName, a distinguished name, or a unique common name. This can also be an ADObject,
@@ -2769,7 +2814,7 @@ class ADSession:
 
     def atomic_append_to_attribute_for_object(self, ad_object: Union[str, ADObject], attribute: str, value,
                                               controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                              skip_validation: bool = False):
+                                              skip_validation: bool = False) -> bool:
         """ Atomically append a value to an attribute for an object in the domain.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2799,7 +2844,7 @@ class ADSession:
 
     def atomic_append_to_attributes_for_object(self, ad_object: Union[str, ADObject], attribute_to_value_map: dict,
                                                controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                               skip_validation: bool = False):
+                                               skip_validation: bool = False) -> bool:
         """ Atomically append values to multiple attributes for an object in the domain.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2829,7 +2874,7 @@ class ADSession:
 
     def overwrite_attribute_for_object(self, ad_object: Union[str, ADObject], attribute: str, value,
                                        controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                       skip_validation: bool = False):
+                                       skip_validation: bool = False) -> bool:
         """ Atomically overwrite the value of an attribute for an object in the domain.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2859,7 +2904,7 @@ class ADSession:
 
     def overwrite_attributes_for_object(self, ad_object: Union[str, ADObject], attribute_to_value_map: dict,
                                         controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                        skip_validation: bool = False):
+                                        skip_validation: bool = False) -> bool:
         """ Atomically overwrite values of multiple attributes for an object in the domain.
 
         :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
@@ -2889,7 +2934,7 @@ class ADSession:
 
     def atomic_append_to_attribute_for_group(self, group: Union[str, ADGroup], attribute: str, value,
                                              controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                             skip_validation: bool = False):
+                                             skip_validation: bool = False) -> bool:
         """ Atomically append a value to an attribute for a group in the domain.
 
         :param group: Either an ADGroup object or string name referencing the group to be modified.
@@ -2918,7 +2963,7 @@ class ADSession:
 
     def atomic_append_to_attributes_for_group(self, group: Union[str, ADGroup], attribute_to_value_map: dict,
                                               controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                              skip_validation: bool = False):
+                                              skip_validation: bool = False) -> bool:
         """ Atomically append values to multiple attributes for a group in the domain.
 
         :param group: Either an ADGroup object or string name referencing the group to be modified.
@@ -2947,7 +2992,7 @@ class ADSession:
 
     def overwrite_attribute_for_group(self, group: Union[str, ADGroup], attribute: str, value,
                                       controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                      skip_validation: bool = False):
+                                      skip_validation: bool = False) -> bool:
         """ Atomically overwrite the value of an attribute for a group in the domain.
 
         :param group: Either an ADUser object or string name referencing the group to be modified.
@@ -2975,7 +3020,7 @@ class ADSession:
 
     def overwrite_attributes_for_group(self, group: Union[str, ADGroup], attribute_to_value_map: dict,
                                        controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                       skip_validation: bool = False):
+                                       skip_validation: bool = False) -> bool:
         """ Atomically overwrite values of multiple attributes for a group in the domain.
 
         :param group: Either an ADGroup object or string name referencing the group to have attributes overwritten.
@@ -3004,7 +3049,7 @@ class ADSession:
 
     def atomic_append_to_attribute_for_user(self, user: Union[str, ADUser], attribute: str, value,
                                             controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                            skip_validation: bool = False):
+                                            skip_validation: bool = False) -> bool:
         """ Atomically append a value to an attribute for a user in the domain.
 
         :param user: Either an ADUser object or string name referencing the user to be modified.
@@ -3034,7 +3079,7 @@ class ADSession:
 
     def atomic_append_to_attributes_for_user(self, user: Union[str, ADUser], attribute_to_value_map: dict,
                                              controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                             skip_validation: bool = False):
+                                             skip_validation: bool = False) -> bool:
         """ Atomically append values to multiple attributes for a user in the domain.
 
         :param user: Either an ADUser object or string name referencing the user to be modified.
@@ -3063,7 +3108,7 @@ class ADSession:
 
     def overwrite_attribute_for_user(self, user: Union[str, ADUser], attribute: str, value,
                                      controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                     skip_validation: bool = False):
+                                     skip_validation: bool = False) -> bool:
         """ Atomically overwrite the value of an attribute for a user in the domain.
 
         :param user: Either an ADUser object or string name referencing the user to be modified.
@@ -3091,7 +3136,7 @@ class ADSession:
 
     def overwrite_attributes_for_user(self, user: Union[str, ADUser], attribute_to_value_map: dict,
                                       controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                      skip_validation: bool = False):
+                                      skip_validation: bool = False) -> bool:
         """ Atomically overwrite values of multiple attributes for a user in the domain.
 
         :param user: Either an ADUser object or string name referencing the user to have attributes overwritten.
@@ -3120,7 +3165,7 @@ class ADSession:
 
     def atomic_append_to_attribute_for_computer(self, computer: Union[str, ADComputer], attribute: str, value,
                                                 controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                                skip_validation: bool = False):
+                                                skip_validation: bool = False) -> bool:
         """ Atomically append a value to an attribute for a computer in the domain.
 
         :param computer: Either an ADComputer object or string name referencing the computer to be modified.
@@ -3150,7 +3195,7 @@ class ADSession:
     def atomic_append_to_attributes_for_computer(self, computer: Union[str, ADComputer], attribute_to_value_map: dict,
                                                  controls: List[Control] = None,
                                                  raise_exception_on_failure: bool = True,
-                                                 skip_validation: bool = False):
+                                                 skip_validation: bool = False) -> bool:
         """ Atomically append values to multiple attributes for a computer in the domain.
 
         :param computer: Either an ADComputer object or string name referencing the computer to be modified.
@@ -3179,7 +3224,7 @@ class ADSession:
 
     def overwrite_attribute_for_computer(self, computer: Union[str, ADComputer], attribute: str, value,
                                          controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                         skip_validation: bool = False):
+                                         skip_validation: bool = False) -> bool:
         """ Atomically overwrite the value of an attribute for a computer in the domain.
 
         :param computer: Either an ADComputer object or string name referencing the computer to be modified.
@@ -3207,7 +3252,7 @@ class ADSession:
 
     def overwrite_attributes_for_computer(self, computer: Union[str, ADComputer], attribute_to_value_map: dict,
                                           controls: List[Control] = None, raise_exception_on_failure: bool = True,
-                                          skip_validation: bool = False):
+                                          skip_validation: bool = False) -> bool:
         """ Atomically overwrite values of multiple attributes for a computer in the domain.
 
         :param computer: Either an ADComputer object or string name referencing the computer to have attributes
@@ -3238,7 +3283,8 @@ class ADSession:
     # generic utilities for figuring out information about the current user with respect to the domain
     # and managing trusts
 
-    def create_transfer_sessions_to_all_trusted_domains(self, ignore_and_remove_failed_transfers=False):
+    def create_transfer_sessions_to_all_trusted_domains(self,
+                                                        ignore_and_remove_failed_transfers=False) -> List['ADSession']:
         """ Create transfer sessions to all of the different active directory domains that trust the domain used for
         this session.
 
@@ -3276,7 +3322,7 @@ class ADSession:
                 raise
         return transferred_sessions
 
-    def is_session_user_from_domain(self):
+    def is_session_user_from_domain(self) -> bool:
         """ Return a boolean indicating whether or not the session's user is a member of the domain that we're
         communicating with, or is trusted from another domain.
         :returns: True if the user is from the domain we're communicating with, False otherwise.
@@ -3289,7 +3335,7 @@ class ADSession:
         domain_member_netbios_start = 'U:' + netbios_name.upper() + '\\'
         return authz_id.upper().startswith(domain_member_netbios_start)
 
-    def who_am_i(self):
+    def who_am_i(self) -> str:
         """ Return the authorization identity of the session's user as recognized by the server.
         This can be helpful when a script is provided with an identity in one form that is used to start a session
         (e.g. a distinguished name, or a pre-populated kerberos cache) and then it wants to determine its identity
@@ -3301,7 +3347,7 @@ class ADSession:
 
     # internal validation utils
 
-    def _validate_group_and_get_group_obj(self, group: Union[str, ADGroup], skip_validation=False):
+    def _validate_group_and_get_group_obj(self, group: Union[str, ADGroup], skip_validation=False) -> ADGroup:
         if isinstance(group, str):
             if skip_validation:
                 return ADGroup(group, {}, self.domain)
@@ -3315,7 +3361,7 @@ class ADSession:
             raise InvalidLdapParameterException('The user specified must be an ADGroup object or a string group name.')
         return group
 
-    def _validate_obj_and_get_ad_obj(self, ad_object: Union[str, ADObject], skip_validation=False):
+    def _validate_obj_and_get_ad_obj(self, ad_object: Union[str, ADObject], skip_validation=False) -> ADObject:
         # get distinguished name and confirm object existence as needed
         if isinstance(ad_object, str):
             if skip_validation:
@@ -3336,7 +3382,7 @@ class ADSession:
         return ad_object
 
     def _validate_user_and_get_user_obj(self, user: Union[str, ADUser], can_be_computer=False,  # computers are users
-                                        skip_validation=False):
+                                        skip_validation=False) -> Union[ADUser, ADComputer]:
         if isinstance(user, str):
             if skip_validation:
                 return ADUser(user, {}, self.domain)
@@ -3353,7 +3399,8 @@ class ADSession:
             raise InvalidLdapParameterException('The user specified must be an ADUser object or a string user name.')
         return user
 
-    def _validate_computer_and_get_computer_obj(self, computer: Union[str, ADComputer], skip_validation=False):
+    def _validate_computer_and_get_computer_obj(self, computer: Union[str, ADComputer],
+                                                skip_validation=False) -> ADComputer:
         if isinstance(computer, str):
             if skip_validation:
                 return ADComputer(computer, {}, self.domain)

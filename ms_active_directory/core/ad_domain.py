@@ -1,3 +1,28 @@
+# Created in August 2021
+#
+# Author: Azaria Zornberg
+#
+# Copyright 2021 - 2021 Azaria Zornberg
+#
+# This file is part of ms_active_directory
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import copy
 import pytz
 
@@ -25,11 +50,12 @@ from ssl import (
     CERT_NONE,
     CERT_REQUIRED,
 )
-from typing import List
+from typing import List, Union
 
 # local imports come after imports from other libraries
 from ms_active_directory import logging_utils
 from ms_active_directory.core.ad_session import ADSession
+from ms_active_directory.core.managed_ad_objects import ManagedADComputer
 from ms_active_directory.environment.constants import ADFunctionalLevel
 from ms_active_directory.environment.discovery.discovery_utils import discover_kdc_domain_controllers_in_domain, \
     discover_ldap_domain_controllers_in_domain
@@ -74,20 +100,86 @@ from ms_active_directory.exceptions import (
 logger = logging_utils.get_logger()
 
 
-def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, authentication_mechanism: str = SIMPLE,
-                   ad_site: str = None, computer_name: str = None, computer_location: str = None,
-                   computer_password: str = None,
-                   computer_encryption_types: List[ADEncryptionType] = None, computer_hostnames: List[str] = None,
-                   computer_services: List[str] = None, supports_legacy_behavior: bool = False,
-                   computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION, **additional_account_attributes):
+def join_ad_domain(domain_dns_name: str, admin_username: str, admin_password: str,
+                   authentication_mechanism: str = SIMPLE, ad_site: str = None, computer_name: str = None,
+                   computer_location: str = None, computer_password: str = None,
+                   computer_encryption_types: List[Union[str, ADEncryptionType]] = None,
+                   computer_hostnames: List[str] = None, computer_services: List[str] = None,
+                   supports_legacy_behavior: bool = False,
+                   computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION,
+                   **additional_account_attributes) -> ManagedADComputer:
     """ A super simple 'join a domain' function that requires minimal input - the domain dns name and admin credentials
     to use in the join process.
     Given those basic inputs, the domain's nearest controllers are automatically discovered and an account is made
     with strong security settings. The account's attributes follow AD naming conventions based on the computer's
     hostname by default.
+    :param domain_dns_name: The DNS name of the domain being joined.
+    :param admin_username: The username of a user or computer with the rights to create the computer.
+                           This username should be formatted based on the authentication protocol being used.
+                           For example, DOMAIN\\username for NTLM as opposed to username@DOMAIN for GSSAPI, or
+                           a distinguished name for SIMPLE.
+                           If `old_computer_password` is specified, then this account only needs permission to
+                           change the password of the computer being taken over, which is different from the reset
+                           password permission.
+    :param admin_password: The password for the user. Optional, as SASL authentication mechanisms can use
+                           `sasl_credentials` specified as a keyword argument, and things like KERBEROS will use
+                           default system kerberos credentials if they're available.
+    :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                     then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                     include all authentication mechanisms and SASL mechanisms from the ldap3
+                                     library, such as SIMPLE, NTLM, KERBEROS, etc.
+    :param ad_site: Optional. The site within the active directory domain where our communication should be confined.
+    :param computer_name: The name of the computer to take over in the domain. This should be the sAMAccountName
+                          of the computer, though if computer has a trailing $ in its sAMAccountName and that is
+                          omitted, that's ok. If not specified, we will attempt to find a computer with a name
+                          matching the local system's hostname.
+    :param computer_location: The location in which to create the computer. This may be specified as an LDAP-style
+                              relative distinguished name (e.g. OU=ServiceMachines,OU=Machines) or a windows path
+                              style canonical name (e.g. example.com/Machines/ServiceMachines).
+                              If not specified, defaults to CN=Computers which is the standard default for AD.
+    :param computer_password: The password to set for the computer when taking it over. If not specified, a random
+                              120 character password will be generated and set.
+    :param computer_encryption_types: A list of encryption types, based on the ADEncryptionType enum, to enable on
+                                      the account created. These may be strings or enums; if they are strings,
+                                      they should be strings of the encryption types as written in kerberos
+                                      RFCs or in AD management tools, and we will try to map them to enums and
+                                      raise an error if they don't match any supported values.
+                                      AES256-SHA1, AES128-SHA1, and RC4-HMAC encryption types are supported. DES
+                                      encryption types aren not.
+                                      If not specified, defaults to [AES256-SHA1].
+    :param computer_hostnames: Hostnames to set for the computer. These will be used to set the dns hostname
+                               attribute in AD. If not specified, the computer hostnames will default to
+                               [`computer_name`, `computer_name`.`domain`] which is the AD standard default.
+    :param computer_services: Services to enable on the computers hostnames. These services dictate what clients
+                              can get kerberos tickets for when communicating with this computer, and this property
+                              is used with `computer_hostnames` to set the service principal names for the computer.
+                              For example, having `nfs` specified as a service principal is necessary if you want
+                              to run an NFS server on this computer and have clients get kerberos tickets for
+                              mounting shares; having `ssh` specified as a service principal is necessary for
+                              clients to request kerberos tickets for sshing to the computer.
+                              If not specified, defaults to `HOST` which is the standard AD default service.
+                              `HOST` covers a wide variety of services, including `cifs`, `ssh`, and many others
+                              depending on your domain. Determining exactly what services are covered by `HOST`
+                              in your domain requires checking the aliases set on a domain controller.
+    :param supports_legacy_behavior: If `True`, then an error will be raised if the computer name is longer than
+                                     15 characters (not including the trailing $). This is because various older
+                                     systems such as NTLM, certain UNC path applications, Netbios, etc. cannot
+                                     use names longer than 15 characters. This name cannot be changed after
+                                     creation, so this is important to control at creation time.
+                                     If not specified, defaults to `False`.
+    :param computer_key_file_path: The path of where to write the keytab file for the computer after taking it over.
+                                   This will include keys for both user and server keys for the computer.
+                                   If not specified, defaults to /etc/krb5.keytab
+    :param additional_account_attributes: Additional keyword argument can be specified to set other LDAP attributes
+                                          of the computer that are not covered above, or where the above controls
+                                          are not sufficiently granular. For example, `userAccountControl` could
+                                          be used to set the user account control values for the computer if it's
+                                          desired to set it differently from the default (e.g. create a computer
+                                          in a disabled state and enable it later).
+    :returns: A ManagedADComputer object representing the computer created.
     """
     domain = ADDomain(domain_dns_name, site=ad_site)
-    return domain.join(admin_user, admin_password, authentication_mechanism, computer_name=computer_name,
+    return domain.join(admin_username, admin_password, authentication_mechanism, computer_name=computer_name,
                        computer_location=computer_location, computer_password=computer_password,
                        computer_hostnames=computer_hostnames, computer_services=computer_services,
                        computer_encryption_types=computer_encryption_types,
@@ -95,11 +187,12 @@ def join_ad_domain(domain_dns_name: str, admin_user: str, admin_password: str, a
                        computer_key_file_path=computer_key_file_path, **additional_account_attributes)
 
 
-def join_ad_domain_by_taking_over_existing_computer(domain_dns_name: str, admin_user: str, admin_password: str,
+def join_ad_domain_by_taking_over_existing_computer(domain_dns_name: str, admin_username: str, admin_password: str,
                                                     authentication_mechanism: str = SIMPLE, ad_site: str = None,
                                                     computer_name: str = None, computer_password: str = None,
                                                     old_computer_password: str = None,
-                                                    computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
+                                                    computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION,
+                                                    **additional_connection_attributes) -> ManagedADComputer:
     """ A super simple 'join a domain' function using pre-created computer accounts, which requires minimal input -
     the domain dns name and admin credentials to use in the join process.
     Specifying a computer name explicitly for the account to take over is also highly recommended.
@@ -107,26 +200,112 @@ def join_ad_domain_by_taking_over_existing_computer(domain_dns_name: str, admin_
     Given those basic inputs, the domain's nearest controllers are automatically discovered and the computer account
     with the specified computer name is found and taken over so it can represent the local system in the domain,
     and the local system can act as it.
+    :param domain_dns_name: The DNS name of the domain being joined.
+    :param admin_username: The username of a user or computer with the rights to reset the password of the computer
+                           being taken over.
+                           This username should be formatted based on the authentication protocol being used.
+                           For example, DOMAIN\\username for NTLM as opposed to username@DOMAIN for GSSAPI, or
+                           a distinguished name for SIMPLE.
+                           If `old_computer_password` is specified, then this account only needs permission to
+                           change the password of the computer being taken over, which is different from the reset
+                           password permission.
+    :param admin_password: The password for the user. Optional, as SASL authentication mechanisms can use
+                           `sasl_credentials` specified as a keyword argument, and things like KERBEROS will use
+                           default system kerberos credentials if they're available.
+    :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                     then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                     include all authentication mechanisms and SASL mechanisms from the ldap3
+                                     library, such as SIMPLE, NTLM, KERBEROS, etc.
+    :param ad_site: Optional. The site within the active directory domain where our communication should be confined.
+    :param computer_name: The name of the computer to take over in the domain. This should be the sAMAccountName
+                          of the computer, though if computer has a trailing $ in its sAMAccountName and that is
+                          omitted, that's ok. If not specified, we will attempt to find a computer with a name
+                          matching the local system's hostname.
+    :param computer_password: The password to set for the computer when taking it over. If not specified, a random
+                              120 character password will be generated and set.
+    :param old_computer_password: The current password of the computer being taken over. If specified, the action
+                                  of taking over the computer will use a "change password" operation, which is less
+                                  privileged than a "reset password" operation. So specifying this reduces the
+                                  permissions needed by the user specified.
+    :param computer_key_file_path: The path of where to write the keytab file for the computer after taking it over.
+                                   This will include keys for both user and server keys for the computer.
+                                   If not specified, defaults to /etc/krb5.keytab
+    :param additional_connection_attributes: Additional keyword arguments may be specified for any properties of
+                                             the `Connection` object from the `ldap3` library that is desired to
+                                             be set on the connection used in the session created for taking over
+                                             the computer. Examples include `sasl_credentials`, `client_strategy`,
+                                             `cred_store`, and `pool_lifetime`.
+    :returns: A ManagedADComputer object representing the computer taken over.
     """
     domain = ADDomain(domain_dns_name, site=ad_site)
-    return domain.join_by_taking_over_existing_computer(admin_user, admin_password, authentication_mechanism,
+    return domain.join_by_taking_over_existing_computer(admin_username, admin_password, authentication_mechanism,
                                                         computer_name=computer_name,
                                                         computer_password=computer_password,
                                                         old_computer_password=old_computer_password,
-                                                        computer_key_file_path=computer_key_file_path)
+                                                        computer_key_file_path=computer_key_file_path,
+                                                        **additional_connection_attributes)
 
 
 def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, computer_location=None,
                                  computer_password=None, computer_encryption_types=None, computer_hostnames=None,
                                  computer_services=None, supports_legacy_behavior=False,
                                  computer_key_file_path=DEFAULT_KRB5_KEYTAB_FILE_LOCATION,
-                                 **additional_account_attributes):
+                                 **additional_account_attributes) -> ManagedADComputer:
     """ A fairly simple 'join a domain' function that requires minimal input - an AD session.
     Given those basic inputs, the domain's nearest controllers are automatically discovered and an account is made
     with strong security settings. The account's attributes follow AD naming conventions based on the computer's
     hostname by default.
     By providing an AD session, one can build a connection to the domain however they so choose and then use it to
     join this computer, so you don't even need to necessarily use user credentials.
+    :param ad_session: The ADSession object representing a connection with the domain to be joined.
+    :param computer_name: The name of the computer to take over in the domain. This should be the sAMAccountName
+                          of the computer, though if computer has a trailing $ in its sAMAccountName and that is
+                          omitted, that's ok. If not specified, we will attempt to find a computer with a name
+                          matching the local system's hostname.
+    :param computer_location: The location in which to create the computer. This may be specified as an LDAP-style
+                              relative distinguished name (e.g. OU=ServiceMachines,OU=Machines) or a windows path
+                              style canonical name (e.g. example.com/Machines/ServiceMachines).
+                              If not specified, defaults to CN=Computers which is the standard default for AD.
+    :param computer_password: The password to set for the computer when taking it over. If not specified, a random
+                              120 character password will be generated and set.
+    :param computer_encryption_types: A list of encryption types, based on the ADEncryptionType enum, to enable on
+                                      the account created. These may be strings or enums; if they are strings,
+                                      they should be strings of the encryption types as written in kerberos
+                                      RFCs or in AD management tools, and we will try to map them to enums and
+                                      raise an error if they don't match any supported values.
+                                      AES256-SHA1, AES128-SHA1, and RC4-HMAC encryption types are supported. DES
+                                      encryption types aren not.
+                                      If not specified, defaults to [AES256-SHA1].
+    :param computer_hostnames: Hostnames to set for the computer. These will be used to set the dns hostname
+                               attribute in AD. If not specified, the computer hostnames will default to
+                               [`computer_name`, `computer_name`.`domain`] which is the AD standard default.
+    :param computer_services: Services to enable on the computers hostnames. These services dictate what clients
+                              can get kerberos tickets for when communicating with this computer, and this property
+                              is used with `computer_hostnames` to set the service principal names for the computer.
+                              For example, having `nfs` specified as a service principal is necessary if you want
+                              to run an NFS server on this computer and have clients get kerberos tickets for
+                              mounting shares; having `ssh` specified as a service principal is necessary for
+                              clients to request kerberos tickets for sshing to the computer.
+                              If not specified, defaults to `HOST` which is the standard AD default service.
+                              `HOST` covers a wide variety of services, including `cifs`, `ssh`, and many others
+                              depending on your domain. Determining exactly what services are covered by `HOST`
+                              in your domain requires checking the aliases set on a domain controller.
+    :param supports_legacy_behavior: If `True`, then an error will be raised if the computer name is longer than
+                                     15 characters (not including the trailing $). This is because various older
+                                     systems such as NTLM, certain UNC path applications, Netbios, etc. cannot
+                                     use names longer than 15 characters. This name cannot be changed after
+                                     creation, so this is important to control at creation time.
+                                     If not specified, defaults to `False`.
+    :param computer_key_file_path: The path of where to write the keytab file for the computer after taking it over.
+                                   This will include keys for both user and server keys for the computer.
+                                   If not specified, defaults to /etc/krb5.keytab
+    :param additional_account_attributes: Additional keyword argument can be specified to set other LDAP attributes
+                                          of the computer that are not covered above, or where the above controls
+                                          are not sufficiently granular. For example, `userAccountControl` could
+                                          be used to set the user account control values for the computer if it's
+                                          desired to set it differently from the default (e.g. create a computer
+                                          in a disabled state and enable it later).
+    :returns: A ManagedADComputer object representing the computer created.
     """
     # for joining a domain, default to using the local machine's hostname as a computer name
     if computer_name is None:
@@ -145,9 +324,9 @@ def join_ad_domain_using_session(ad_session: ADSession, computer_name=None, comp
     return computer
 
 
-def join_ad_domain_by_taking_over_existing_computer_using_session(ad_session: ADSession, computer_name=None,
-                                                                  computer_password=None, old_computer_password=None,
-                                                                  computer_key_file_path=DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
+def join_ad_domain_by_taking_over_existing_computer_using_session(
+        ad_session: ADSession, computer_name=None, computer_password=None, old_computer_password=None,
+        computer_key_file_path=DEFAULT_KRB5_KEYTAB_FILE_LOCATION) -> ManagedADComputer:
     """ A fairly simple 'join a domain' function using pre-created accounts, which requires minimal input - an AD
     session. Specifying the name of the computer to takeover explicitly is also encouraged.
 
@@ -158,6 +337,21 @@ def join_ad_domain_by_taking_over_existing_computer_using_session(ad_session: AD
 
     By providing an AD session, one can build a connection to the domain however they so choose and then use it to
     join this computer, so you don't even need to necessarily use user credentials.
+    :param ad_session: The ADSession object representing a connection with the domain to be joined.
+    :param computer_name: The name of the computer to take over in the domain. This should be the sAMAccountName
+                          of the computer, though if computer has a trailing $ in its sAMAccountName and that is
+                          omitted, that's ok. If not specified, we will attempt to find a computer with a name
+                          matching the local system's hostname.
+    :param computer_password: The password to set for the computer when taking it over. If not specified, a random
+                              120 character password will be generated and set.
+    :param old_computer_password: The current password of the computer being taken over. If specified, the action
+                                  of taking over the computer will use a "change password" operation, which is less
+                                  privileged than a "reset password" operation. So specifying this reduces the
+                                  permissions needed by the user specified.
+    :param computer_key_file_path: The path of where to write the keytab file for the computer after taking it over.
+                                   This will include keys for both user and server keys for the computer.
+                                   If not specified, defaults to /etc/krb5.keytab
+    :returns: A ManagedADComputer object representing the computer taken over.
     """
     # for joining a domain, default to using the local machine's hostname as a computer name
     if computer_name is None:
@@ -266,19 +460,19 @@ class ADDomain:
         if kerberos_uris:
             self.set_kerberos_uris(kerberos_uris)
 
-    def get_domain_dns_name(self):
+    def get_domain_dns_name(self) -> str:
         return self.domain
 
-    def get_ldap_servers(self):
+    def get_ldap_servers(self) -> List[Server]:
         return [self._copy_ldap_server(serv) for serv in self.ldap_servers]
 
-    def get_ldap_uris(self):
+    def get_ldap_uris(self) -> List[str]:
         return copy.deepcopy(self.ldap_uris)
 
-    def get_kerberos_uris(self):
+    def get_kerberos_uris(self) -> List[str]:
         return copy.deepcopy(self.kerberos_uris)
 
-    def _copy_ldap_server(self, serv: Server):
+    def _copy_ldap_server(self, serv: Server) -> Server:
         """ Copies an LDAP Server object. The normal python copy doesn't work on Server objects because
         they have locks in them. But sharing server objects across threads/connections/sessions/etc.
         can cause a lot of issues where shared state gets messed up by failed queries or changes in
@@ -330,7 +524,8 @@ class ADDomain:
                                                       'elements must be strings'.format(type(serv)))
         self.kerberos_uris = kerberos_uris
 
-    def is_close_in_time_to_localhost(self, ldap_connection: Connection = None, allowed_drift_seconds: int = None):
+    def is_close_in_time_to_localhost(self, ldap_connection: Connection = None,
+                                      allowed_drift_seconds: int = None) -> bool:
         """ Check if we're close in time to the domain.
         This is primarily useful for kerberos and TLS negotiation health.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
@@ -349,7 +544,7 @@ class ADDomain:
             diff = local_time - domain_time
         return diff < timedelta(seconds=allowed_drift_seconds)
 
-    def find_current_time(self, ldap_connection: Connection = None):
+    def find_current_time(self, ldap_connection: Connection = None) -> datetime:
         """ Find the current time for this domain. This is useful for detecting drift that can cause
         Kerberos and TLS issues.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
@@ -378,7 +573,7 @@ class ADDomain:
         useful_time = datetime.strptime(ad_time, '%Y%m%d%H%M%S.0Z')
         return pytz.utc.localize(useful_time)
 
-    def find_functional_level(self, ldap_connection: Connection = None):
+    def find_functional_level(self, ldap_connection: Connection = None) -> AD_DOMAIN_FUNCTIONAL_LEVEL:
         """ Find the functional level for this domain.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
         connection will be created and used.
@@ -402,7 +597,7 @@ class ADDomain:
         level_str = base_attrs.get(AD_DOMAIN_FUNCTIONAL_LEVEL)[0]
         return ADFunctionalLevel.get_functional_level_from_value(int(level_str))
 
-    def find_netbios_name(self, ldap_connection: Connection = None, force_refresh: bool = False):
+    def find_netbios_name(self, ldap_connection: Connection = None, force_refresh: bool = False) -> str:
         """ Find the netbios name for this domain. Renaming a domain is a huge task and is incredibly rare,
         so this information is cached when first read, and it only re-read if specifically requested.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
@@ -443,7 +638,7 @@ class ADDomain:
         self.netbios_name = nb_name
         return self.netbios_name
 
-    def find_supported_sasl_mechanisms(self, ldap_connection: Connection = None):
+    def find_supported_sasl_mechanisms(self, ldap_connection: Connection = None) -> List[str]:
         """ Find the supported SASL mechanisms for this domain.
         Optionally, an existing connection can be used. If one is not specified, an anonymous LDAP
         connection will be created and used.
@@ -466,7 +661,7 @@ class ADDomain:
         base_attrs = response[0]['attributes']
         return base_attrs.get(AD_DOMAIN_SUPPORTED_SASL_MECHANISMS, [])
 
-    def find_trusted_domains(self, ldap_connection: Connection = None):
+    def find_trusted_domains(self, ldap_connection: Connection = None) -> List['ADTrustedDomain']:
         """ Find the trusted domains for this domain.
         An LDAP connection is technically optional, as some domains allow enumeration of trust
         relationships by anonymous users, but a connection is likely needed. If one is not specified,
@@ -595,15 +790,53 @@ class ADDomain:
 
     def create_ldap_connection_as_user(self, user: str = None, password: str = None,
                                        authentication_mechanism: str = None,
-                                       **kwargs):
-        """ Create an LDAP connection with AD domain authenticated as the specified user. """
+                                       **kwargs) -> Connection:
+        """ Create an LDAP connection with AD domain authenticated as the specified user.
+
+        :param user: The name of the user to use when authenticating with the domain. This should be formatted based
+                     on the authentication mechanism. For example, kerberos authentication expects username@domain,
+                     NTLM expects domain\\username, and simple authentication can use a distinguished name,
+                     username@domain, or other formats based on your domain's settings.
+                     If not specified, anonymous authentication will be used. If specified, SIMPLE authentication
+                     will be used by default if authentication_mechanism is not specified.
+        :param password: The password to use when authenticating with the domain.
+                         If not specified, anonymous authentication will be used. If specified, SIMPLE authentication
+                         will be used by default if authentication_mechanism is not specified.
+        :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                         then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                         include all authentication mechanisms and SASL mechanisms from the ldap3
+                                         library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param kwargs: Additional keyword arguments can be specified for any of the arguments to an ldap3 Connection
+                       object and they will be used. This can be used to set things like `client_strategy` or
+                       `pool_name`.
+        :return: An ldap3 Connection object representing a connection with the domain.
+        """
         logger.info('Establishing connection with AD domain %s using LDAP authentication mechanism %s and user %s',
                     self.domain, authentication_mechanism, user)
         return self._create_connection(user, password, authentication_mechanism, **kwargs)
 
     def create_session_as_user(self, user: str = None, password: str = None, authentication_mechanism: str = None,
-                               **kwargs):
-        """ Create a session with AD domain authenticated as the specified user. """
+                               **kwargs) -> ADSession:
+        """ Create a session with AD domain authenticated as the specified user.
+
+        :param user: The name of the user to use when authenticating with the domain. This should be formatted based
+                     on the authentication mechanism. For example, kerberos authentication expects username@domain,
+                     NTLM expects domain\\username, and simple authentication can use a distinguished name,
+                     username@domain, or other formats based on your domain's settings.
+                     If not specified, anonymous authentication will be used. If specified, SIMPLE authentication
+                     will be used by default if authentication_mechanism is not specified.
+        :param password: The password to use when authenticating with the domain.
+                         If not specified, anonymous authentication will be used. If specified, SIMPLE authentication
+                             will be used by default if authentication_mechanism is not specified.
+        :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                         then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                         include all authentication mechanisms and SASL mechanisms from the ldap3
+                                         library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param kwargs: Additional keyword arguments can be specified for any of the arguments to an ldap3 Connection
+                       object and they will be used. This can be used to set things like `client_strategy` or
+                       `pool_name`.
+        :return: An ADSession object representing a connection with the domain.
+        """
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and user %s',
                     self.domain, authentication_mechanism, user)
         conn = self._create_connection(user, password, authentication_mechanism, **kwargs)
@@ -612,8 +845,28 @@ class ADDomain:
 
     def create_ldap_connection_as_computer(self, computer_name: str, computer_password: str = None,
                                            check_name_format: bool = True,
-                                           authentication_mechanism: str = KERBEROS, **kwargs):
-        """ Create an LDAP connection with AD domain authenticated as the specified computer. """
+                                           authentication_mechanism: str = KERBEROS, **kwargs) -> Connection:
+        """ Create an LDAP connection with AD domain authenticated as the specified computer.
+        :param computer_name: The name of the computer to use when authenticating with the domain.
+        :param computer_password: Optional, the password of the computer to use when authenticating with the domain.
+                                  If using an authentication mechanism like NTLM, this must be specified. But for
+                                  authentication mechanisms such as kerberos or external, either `sasl_credentials`
+                                  can be specified as a keyword argument or default system credentials will be used
+                                  in accordance with the auth mechanism.
+        :param check_name_format: If True, the `computer_name` will be processed to try and format it based on the
+                                  authentication mechanism in use. For NTLM we will try to format it as
+                                  `domain`\\`computer_name`, and for Kerberos/GSSAPI we will try to format is ass
+                                  `computer_name`@`domain`.
+                                  Defaults to True.
+        :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                         then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                         include all authentication mechanisms and SASL mechanisms from the ldap3
+                                         library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param kwargs: Additional keyword arguments can be specified for any of the arguments to an ldap3 Connection
+                       object and they will be used. This can be used to set things like `client_strategy` or
+                       `pool_name`.
+        :returns: A Connection object representing a ldap connection with the domain.
+        """
         logger.info(
             'Establishing LDAP connection with AD domain %s using LDAP authentication mechanism %s and computer %s',
             self.domain, authentication_mechanism, computer_name)
@@ -631,8 +884,28 @@ class ADDomain:
 
     def create_session_as_computer(self, computer_name: str, computer_password: str = None,
                                    check_name_format: bool = True,
-                                   authentication_mechanism: str = KERBEROS, **kwargs):
-        """ Create a session with AD domain authenticated as the specified computer. """
+                                   authentication_mechanism: str = KERBEROS, **kwargs) -> ADSession:
+        """ Create a session with AD domain authenticated as the specified computer.
+        :param computer_name: The name of the computer to use when authenticating with the domain.
+        :param computer_password: Optional, the password of the computer to use when authenticating with the domain.
+                                  If using an authentication mechanism like NTLM, this must be specified. But for
+                                  authentication mechanisms such as kerberos or external, either `sasl_credentials`
+                                  can be specified as a keyword argument or default system credentials will be used
+                                  in accordance with the auth mechanism.
+        :param check_name_format: If True, the `computer_name` will be processed to try and format it based on the
+                                  authentication mechanism in use. For NTLM we will try to format it as
+                                  `domain`\\`computer_name`, and for Kerberos/GSSAPI we will try to format is ass
+                                  `computer_name`@`domain`.
+                                  Defaults to True.
+        :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                         then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                         include all authentication mechanisms and SASL mechanisms from the ldap3
+                                         library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param kwargs: Additional keyword arguments can be specified for any of the arguments to an ldap3 Connection
+                       object and they will be used. This can be used to set things like `client_strategy` or
+                       `pool_name`.
+        :returns: An ADSession object representing a connection with the domain.
+        """
         logger.info('Establishing session with AD domain %s using LDAP authentication mechanism %s and computer %s',
                     self.domain, authentication_mechanism, computer_name)
         conn = self.create_ldap_connection_as_computer(computer_name, computer_password, check_name_format,
@@ -642,15 +915,77 @@ class ADDomain:
 
     def join(self, admin_username: str, admin_password: str, authentication_mechanism: str = SIMPLE,
              computer_name: str = None, computer_location: str = None, computer_password: str = None,
-             computer_encryption_types: List[ADEncryptionType] = None, computer_hostnames: List[str] = None,
+             computer_encryption_types: List[Union[str, ADEncryptionType]] = None, computer_hostnames: List[str] = None,
              computer_services: List[str] = None, supports_legacy_behavior: bool = False,
              computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION,
-             **additional_account_attributes):
+             **additional_account_attributes) -> ManagedADComputer:
         """ A super simple 'join the domain' function that requires minimal input - just admin user credentials
         to use in the join process.
         Given those basic inputs, the domain's settings are used to establish a connection, and an account is made
         with strong security settings. The account's attributes follow AD naming conventions based on the computer's
         hostname by default.
+        :param admin_username: The username of a user or computer with the rights to create the computer.
+                               This username should be formatted based on the authentication protocol being used.
+                               For example, DOMAIN\\username for NTLM as opposed to username@DOMAIN for GSSAPI, or
+                               a distinguished name for SIMPLE.
+                               If `old_computer_password` is specified, then this account only needs permission to
+                               change the password of the computer being taken over, which is different from the reset
+                               password permission.
+        :param admin_password: The password for the user. Optional, as SASL authentication mechanisms can use
+                               `sasl_credentials` specified as a keyword argument, and things like KERBEROS will use
+                               default system kerberos credentials if they're available.
+        :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                         then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                         include all authentication mechanisms and SASL mechanisms from the ldap3
+                                         library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param computer_name: The name of the computer to take over in the domain. This should be the sAMAccountName
+                              of the computer, though if computer has a trailing $ in its sAMAccountName and that is
+                              omitted, that's ok. If not specified, we will attempt to find a computer with a name
+                              matching the local system's hostname.
+        :param computer_location: The location in which to create the computer. This may be specified as an LDAP-style
+                                  relative distinguished name (e.g. OU=ServiceMachines,OU=Machines) or a windows path
+                                  style canonical name (e.g. example.com/Machines/ServiceMachines).
+                                  If not specified, defaults to CN=Computers which is the standard default for AD.
+        :param computer_password: The password to set for the computer when taking it over. If not specified, a random
+                                  120 character password will be generated and set.
+        :param computer_encryption_types: A list of encryption types, based on the ADEncryptionType enum, to enable on
+                                          the account created. These may be strings or enums; if they are strings,
+                                          they should be strings of the encryption types as written in kerberos
+                                          RFCs or in AD management tools, and we will try to map them to enums and
+                                          raise an error if they don't match any supported values.
+                                          AES256-SHA1, AES128-SHA1, and RC4-HMAC encryption types are supported. DES
+                                          encryption types aren not.
+                                          If not specified, defaults to [AES256-SHA1].
+        :param computer_hostnames: Hostnames to set for the computer. These will be used to set the dns hostname
+                                   attribute in AD. If not specified, the computer hostnames will default to
+                                   [`computer_name`, `computer_name`.`domain`] which is the AD standard default.
+        :param computer_services: Services to enable on the computers hostnames. These services dictate what clients
+                                  can get kerberos tickets for when communicating with this computer, and this property
+                                  is used with `computer_hostnames` to set the service principal names for the computer.
+                                  For example, having `nfs` specified as a service principal is necessary if you want
+                                  to run an NFS server on this computer and have clients get kerberos tickets for
+                                  mounting shares; having `ssh` specified as a service principal is necessary for
+                                  clients to request kerberos tickets for sshing to the computer.
+                                  If not specified, defaults to `HOST` which is the standard AD default service.
+                                  `HOST` covers a wide variety of services, including `cifs`, `ssh`, and many others
+                                  depending on your domain. Determining exactly what services are covered by `HOST`
+                                  in your domain requires checking the aliases set on a domain controller.
+        :param supports_legacy_behavior: If `True`, then an error will be raised if the computer name is longer than
+                                         15 characters (not including the trailing $). This is because various older
+                                         systems such as NTLM, certain UNC path applications, Netbios, etc. cannot
+                                         use names longer than 15 characters. This name cannot be changed after
+                                         creation, so this is important to control at creation time.
+                                         If not specified, defaults to `False`.
+        :param computer_key_file_path: The path of where to write the keytab file for the computer after taking it over.
+                                       This will include keys for both user and server keys for the computer.
+                                       If not specified, defaults to /etc/krb5.keytab
+        :param additional_account_attributes: Additional keyword argument can be specified to set other LDAP attributes
+                                              of the computer that are not covered above, or where the above controls
+                                              are not sufficiently granular. For example, `userAccountControl` could
+                                              be used to set the user account control values for the computer if it's
+                                              desired to set it differently from the default (e.g. create a computer
+                                              in a disabled state and enable it later).
+        :returns: A ManagedADComputer object representing the computer created.
         """
         ad_session = self.create_session_as_user(admin_username, admin_password, authentication_mechanism)
         return join_ad_domain_using_session(ad_session, computer_name=computer_name,
@@ -662,21 +997,56 @@ class ADDomain:
                                             computer_key_file_path=computer_key_file_path,
                                             **additional_account_attributes)
 
-    def join_by_taking_over_existing_computer(self, admin_username: str, admin_password: str,
+    def join_by_taking_over_existing_computer(self, admin_username: str, admin_password: str = None,
                                               authentication_mechanism: str = SIMPLE, computer_name: str = None,
                                               computer_password: str = None, old_computer_password: str = None,
-                                              computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION):
+                                              computer_key_file_path: str = DEFAULT_KRB5_KEYTAB_FILE_LOCATION,
+                                              **additional_connection_attributes) -> ManagedADComputer:
         """ A super simple 'join the domain' function that requires minimal input - just admin user credentials
         to use in the join process.
-        Given those basic inputs, the domain's settings are used to establish a connection, and an account is made
-        with strong security settings. The account's attributes follow AD naming conventions based on the computer's
-        hostname by default.
+        Given those basic inputs, the domain's settings are used to establish a connection, and an account is taken over
+        based on inputs. The account's attributes are then read and used to generate kerberos keys and set other attributes
+        of the returned object.
+        :param admin_username: The username of a user or computer with the rights to reset the password of the computer
+                               being taken over.
+                               This username should be formatted based on the authentication protocol being used.
+                               For example, DOMAIN\\username for NTLM as opposed to username@DOMAIN for GSSAPI, or
+                               a distinguished name for SIMPLE.
+                               If `old_computer_password` is specified, then this account only needs permission to
+                               change the password of the computer being taken over, which is different from the reset
+                               password permission.
+        :param admin_password: The password for the user. Optional, as SASL authentication mechanisms can use
+                               `sasl_credentials` specified as a keyword argument, and things like KERBEROS will use
+                               default system kerberos credentials if they're available.
+        :param authentication_mechanism: An LDAP authentication mechanism or SASL mechanism. If 'SASL' is specified,
+                                         then the keyword argument `sasl_mechanism` must also be specified. Valid values
+                                         include all authentication mechanisms and SASL mechanisms from the ldap3
+                                         library, such as SIMPLE, NTLM, KERBEROS, etc.
+        :param computer_name: The name of the computer to take over in the domain. This should be the sAMAccountName
+                              of the computer, though if computer has a trailing $ in its sAMAccountName and that is
+                              omitted, that's ok. If not specified, we will attempt to find a computer with a name
+                              matching the local system's hostname.
+        :param computer_password: The password to set for the computer when taking it over. If not specified, a random
+                                  120 character password will be generated and set.
+        :param old_computer_password: The current password of the computer being taken over. If specified, the action
+                                      of taking over the computer will use a "change password" operation, which is less
+                                      privileged than a "reset password" operation. So specifying this reduces the
+                                      permissions needed by the user specified.
+        :param computer_key_file_path: The path of where to write the keytab file for the computer after taking it over.
+                                       This will include keys for both user and server keys for the computer.
+                                       If not specified, defaults to /etc/krb5.keytab
+        :param additional_connection_attributes: Additional keyword arguments may be specified for any properties of
+                                                 the `Connection` object from the `ldap3` library that is desired to
+                                                 be set on the connection used in the session created for taking over
+                                                 the computer. Examples include `sasl_credentials`, `client_strategy`,
+                                                 `cred_store`, and `pool_lifetime`.
+        :returns: A ManagedADComputer object representing the computer taken over.
         """
-        ad_session = self.create_session_as_user(admin_username, admin_password, authentication_mechanism)
-        return join_ad_domain_by_taking_over_existing_computer_using_session(ad_session, computer_name=computer_name,
-                                                                             computer_password=computer_password,
-                                                                             old_computer_password=old_computer_password,
-                                                                             computer_key_file_path=computer_key_file_path)
+        ad_session = self.create_session_as_user(admin_username, admin_password, authentication_mechanism,
+                                                 **additional_connection_attributes)
+        return join_ad_domain_by_taking_over_existing_computer_using_session(
+            ad_session, computer_name=computer_name, computer_password=computer_password,
+            old_computer_password=old_computer_password, computer_key_file_path=computer_key_file_path)
 
     def __repr__(self):
         result = 'ADDomain(domain={}'.format(self.domain)
@@ -739,7 +1109,7 @@ class ADTrustedDomain:
                              discover_ldap_servers: bool = True,
                              discover_kerberos_servers: bool = True,
                              dns_nameservers: List[str] = None,
-                             source_ip: str = None):
+                             source_ip: str = None) -> ADDomain:
         """Convert this AD domain trust to an ADDomain object. This takes all of the same keyword arguments
         as creating an ADDomain object, and use the attributes of the primary domain where appropriate for
         network settings.
@@ -825,76 +1195,113 @@ class ADTrustedDomain:
                         dns_nameservers=dns_nameservers, source_ip=source_ip,
                         netbios_name=self.netbios_name)
 
-    def get_fqdn(self):
+    def get_fqdn(self) -> str:
+        """ Returns the FQDN of the trusted domain. """
         return self.domain
 
-    def get_netbios_name(self):
+    def get_netbios_name(self) -> str:
+        """ Returns the netbios name of the trusted domain. """
         return self.netbios_name
 
-    def get_posix_offset(self):
+    def get_posix_offset(self) -> int:
+        """ Returns the posix offset for the trust relationship. This is specific to the primary domain. """
         return self.trust_posix_offset
 
-    def get_raw_trust_attributes_value(self):
+    def get_raw_trust_attributes_value(self) -> int:
+        """ Returns the raw trust attributes value, which is a bitstring indicating properties of the trust. """
         return self.trust_attributes_value
 
     # trust types
 
-    def is_non_active_directory_windows_trust(self):
+    def is_non_active_directory_windows_trust(self) -> bool:
+        """ Returns True if the trusted domain is a non-Active Directory windows domain. """
         return self.trust_type == trust_constants.TRUST_TYPE_NON_AD_WINDOWS
 
-    def is_active_directory_domain_trust(self):
+    def is_active_directory_domain_trust(self) -> bool:
+        """ Returns True if the trusted domain is an Active Directory domain. """
         return self.trust_type == trust_constants.TRUST_TYPE_WINDOWS_AD
 
-    def is_mit_trust(self):
+    def is_mit_trust(self) -> bool:
+        """ Returns True if the trusted domain is an MIT Kerberos Realm. """
         return self.trust_type == trust_constants.TRUST_TYPE_MIT
 
     # trust directions
 
-    def is_disabled(self):
+    def is_disabled(self) -> bool:
+        """ Returns True if the trust relationship has been disabled. """
         return self.disabled
 
-    def is_bidirectional_trust(self):
+    def is_bidirectional_trust(self) -> bool:
+        """ Returns True if the trust is mutual, meaning the primary domain trusts users from the trusted domain, and
+        the trusted domain trusts users from the primary domain."""
         return self.primary_domain_is_trusted_by_self and self.self_is_trusted_by_primary_domain
 
-    def trusts_primary_domain(self):
+    def trusts_primary_domain(self) -> bool:
+        """ Returns True if the trusted domain trusts users originating in the primary domain. """
         return self.primary_domain_is_trusted_by_self
 
-    def is_trusted_by_primary_domain(self):
+    def is_trusted_by_primary_domain(self) -> bool:
+        """ Returns True if the primary domain trusts users originating in the trusted domain. """
         return self.self_is_trusted_by_primary_domain
 
     # trust attributes
 
-    def is_transitive_trust(self):
+    def is_transitive_trust(self) -> bool:
+        """ Returns True if the trust relationship is transitive. If a relationship is transitive, then that means
+        that if A trusts principals from B, and B trusts principals from C, then A will also trust principals from C
+        even if it doesn't explicitly know that C exists.
+        Cross-forest trusts are inherently transitive unless transitivity is disabled. Cross-domain trusts are not
+        inherently transitive.
+        """
         inherently_transitive = self.is_cross_forest_trust()
         explicitly_non_transitive = bool(
             self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_NON_TRANSITIVE_BIT)
         return inherently_transitive and not explicitly_non_transitive
 
-    def is_cross_forest_trust(self):
+    def is_cross_forest_trust(self) -> bool:
+        """ Returns True if the trust relationship is a cross-forest trust. """
         return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_FOREST_TRANSITIVE_BIT)
 
-    def is_cross_organization_trust(self):
+    def is_cross_organization_trust(self) -> bool:
+        """ Returns True if the trust relationship is a cross-organization trust. """
         return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_CROSS_ORGANIZATION_BIT)
 
-    def is_in_same_forest_as_primary_domain(self):
+    def is_in_same_forest_as_primary_domain(self) -> bool:
+        """ Returns True if the trusted domain is in the same forest as the primary domain. For example,
+        both "americas.my-corp.net" and "emea.my-corp.net" might be subdomains within the "my-corp.net"
+        forest.
+        """
         return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_WITHIN_FOREST)
 
-    def is_findable_via_netlogon(self):
+    def is_findable_via_netlogon(self) -> bool:
+        """ Returns True if the trusted domain is findable in netlogon and the trust works there. """
         # things that are do not support pre-windows 2000 do not appear in netlogon.
         # and as far as I can tell, that's the only meaningful information in this bit
         return not (self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_WIN_2000_PLUS_ONLY_BIT)
 
-    def should_treat_as_external_trust(self):
+    def should_treat_as_external_trust(self) -> bool:
+        """ Returns True if the trusted domain is configured such that it should be explicitly treated as
+        if the trusted domain is external to the forest of the primary domain, despite being within it.
+        """
         return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_TREAT_AS_EXTERNAL)
 
-    def mit_trust_uses_rc4_hmac_for(self):
+    def mit_trust_uses_rc4_hmac_for(self) -> bool:
+        """ Returns True to indicate that this trusted MIT Kerberos Realm can use RC4-HMAC encryption.
+        This is only relevant for MIT Kerberos Realms, and is a legacy attribute from a time when
+        RC4-HMAC was not widely adopted, AES128/AES256 weren't standard in AD, and only the less secure
+        single-DES encryption mechanisms were shared between MIT and AD by default.
+        """
         return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_USES_RC4_ENCRYPTION)
 
-    def uses_sid_filtering(self):
+    def uses_sid_filtering(self) -> bool:
+        """ Returns True if this relationship employs SID filtering. This is common in forest trusts/transitive trusts
+        in order to ensure some level of control over which users from other domains are allowed to operate within
+        the primary domain.
+        """
         return bool(self.trust_attributes_value & trust_constants.TRUST_ATTRIBUTE_QUARANTINED_DOMAIN_BIT)
 
     def create_transfer_session_to_trusted_domain(self, ad_session: ADSession, converted_ad_domain: ADDomain = None,
-                                                  skip_validation: bool = False):
+                                                  skip_validation: bool = False) -> ADSession:
         """ Create a session with this trusted domain that functionally transfers the authentication of a given session.
         This is useful for transferring a kerberos/ntlm session to create new sessions for querying in trusted domains
         without needing to provide credentials ever time.

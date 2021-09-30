@@ -1,0 +1,7 @@
+# this includes all of the optional packages (e.g. gssapi is only needed if you want to use kerberos)
+# during development/testing all packages should be installed
+# this also includes requirements for building docs
+pyasn1>=0.4.6
+six>=1.15.0
+sphinx>=3.03
+sphinx_rtd_theme>=0.4.3

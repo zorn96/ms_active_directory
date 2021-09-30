@@ -130,3 +130,6 @@ dmypy.json
 
 # IntelliJ w/ Python Plugin
 .idea
+
+# macOS
+.DS_Store

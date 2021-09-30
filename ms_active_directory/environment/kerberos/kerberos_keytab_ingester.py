@@ -1,6 +1,33 @@
 """ Utilities for parsing keytab files into GSS Kerberos Keys. """
+# Created in August 2021
+#
+# Author: Azaria Zornberg
+#
+# Copyright 2021 - 2021 Azaria Zornberg
+#
+# This file is part of ms_active_directory
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 import binascii
 import os
+
+from typing import List, Tuple
 
 from ms_active_directory import logging_utils
 
@@ -33,23 +60,25 @@ from ms_active_directory.exceptions import KeytabEncodingException
 logger = logging_utils.get_logger()
 
 
-def process_keytab_bytes_to_extract_entries(keytab: bytes):
+def process_keytab_bytes_to_extract_entries(keytab: bytes) -> List[GssKerberosKey]:
     """ Given a byte string of binary keytab data, extract keytab entries from it and return them as GSSKerberosKeys.
     """
     hex_keytab_data = binascii.hexlify(keytab).decode('utf-8')
     return process_hex_string_keytab_file_to_extract_entries(hex_keytab_data)
 
 
-def process_keytab_file_to_extract_entries(keytab_file_path: str):
+def process_keytab_file_to_extract_entries(keytab_file_path: str, must_exist: bool = True) -> List[GssKerberosKey]:
     """ Given a file path for a keytab, extract keytab entries from it and return them as GSSKerberosKeys. """
     if not os.path.isfile(keytab_file_path):
+        if not must_exist:
+            return []
         raise KeytabEncodingException('File {} cannot be found for reading keytabs.'
                                       .format(keytab_file_path))
     keytab_data = open(keytab_file_path, 'rb').read()
     return process_keytab_bytes_to_extract_entries(keytab_data)
 
 
-def _twos_complement(value: int, bits: int):
+def _twos_complement(value: int, bits: int) -> int:
     """ This does twos complement so we can convert hex strings to signed integers.
     Why is this not built-in to python int?
     """
@@ -59,7 +88,7 @@ def _twos_complement(value: int, bits: int):
 
 
 def _read_bytes_as_number(keytab: str, index: int, bytes_to_read: int = 1, keytab_format_version: int = 1,
-                          is_signed_int: bool = False):
+                          is_signed_int: bool = False) -> int:
     """ Given hex-encoded keytab data, the index we're starting from, the number of
     bytes in the keytab we want to read, and the keytab format version, this function
     will read and interpret the bytes requested starting at the index. Bytes may be
@@ -96,7 +125,7 @@ def _read_bytes_as_number(keytab: str, index: int, bytes_to_read: int = 1, keyta
     return unsigned_value
 
 
-def _read_bytes_as_string(keytab: str, index: int, bytes_to_read: int):
+def _read_bytes_as_string(keytab: str, index: int, bytes_to_read: int) -> str:
     """ Given hex-encoded keytab data, the index we're starting from, the number of
     bytes in the keytab we want to read, and the keytab format version, this function
     will read and interpret the bytes requested starting at the index.
@@ -113,7 +142,8 @@ def _read_bytes_as_string(keytab: str, index: int, bytes_to_read: int):
 
 
 def _read_bytes_to_number_and_then_move_position(keytab: str, current_keytab_position: int, bytes_to_read: int,
-                                                 keytab_format_version: int, is_signed_int: bool = False):
+                                                 keytab_format_version: int,
+                                                 is_signed_int: bool = False) -> Tuple[int, int]:
     """ Read some number of bytes from the keytab starting at the given position, move our
     position in the keytab forward, and return the value read as an integer and the new position.
 
@@ -126,7 +156,8 @@ def _read_bytes_to_number_and_then_move_position(keytab: str, current_keytab_pos
     return read_value, new_keytab_position
 
 
-def _read_bytes_to_string_and_then_move_position(keytab: str, current_keytab_position: int, bytes_to_read: int):
+def _read_bytes_to_string_and_then_move_position(keytab: str, current_keytab_position: int,
+                                                 bytes_to_read: int) -> Tuple[str, int]:
     """ Read some number of bytes from the keytab starting at the given position, move our
     position in the keytab forward, and return the value read and the new position.
 
@@ -139,7 +170,7 @@ def _read_bytes_to_string_and_then_move_position(keytab: str, current_keytab_pos
 
 
 def _get_principal_component_length_and_then_read_component(keytab: str, current_keytab_position: int,
-                                                            keytab_format_version: int):
+                                                            keytab_format_version: int) -> Tuple[str, int]:
     """ Extract the component length value from a keytab and then read the following component.
     Component length is always encoded into the keytab in a fixed size entry, so we can always
     read component lengths the same way and interpret them.
@@ -155,7 +186,7 @@ def _get_principal_component_length_and_then_read_component(keytab: str, current
     return component, current_keytab_position
 
 
-def process_hex_string_keytab_file_to_extract_entries(keytab: str):
+def process_hex_string_keytab_file_to_extract_entries(keytab: str) -> List[GssKerberosKey]:
     """ Given a hex encoded keytab file, extract all of the entries in it and return a list of
     dictionaries describing each entry.
     """

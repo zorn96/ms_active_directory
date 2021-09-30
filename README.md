@@ -10,6 +10,9 @@ It primarily builds on the LDAP protocol, and supports LDAP over TLS with channe
 and all LDAP basic, NTLM, and SASL authentication mechanisms (e.g. Kerberos) supported by the
 `ldap3` python library.
 
+For more detailed documentation, please see the docs at:\
+**https://ms-active-directory.readthedocs.io/**
+
 **Author**: Azaria Zornberg
 \
 **Email**: a.zornberg96@gmail.com
