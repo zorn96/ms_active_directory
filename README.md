@@ -37,6 +37,7 @@ For more detailed documentation, please see the docs at:\
 13. Adding permissions to the security descriptor for a user, computer, group, or generic object
 14. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
     or overwriting values.
+15. Support for finding policies within a domain, and for finding the policies directly attached to any given object.
 
 
 # Examples

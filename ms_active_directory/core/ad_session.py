@@ -59,6 +59,7 @@ from ms_active_directory.core.managed_ad_objects import ManagedADComputer
 from ms_active_directory.core.ad_objects import (
     ADComputer,
     ADGroup,
+    ADGroupPolicy,
     ADUser,
     ADObject,
     cast_ad_object_to_specific_object_type,
@@ -694,6 +695,23 @@ class ADSession:
         return self.domain.find_netbios_name(self.ldap_connection, force_refresh)
         pass
 
+    def find_policies_in_domain(self) -> List[ADGroupPolicy]:
+        """ Find all of the policy objects in this domain. The number of policies is often less than the
+        number of things affected by them, so querying all of them once and handling mapping locally is
+        more desirable than re-querying policies every time a container that bears policies is queried.
+
+        :returns: A list of ADGroupPolicy objects representing the policies in the domain.
+        """
+        policy_loc = ldap_constants.DOMAIN_POLICIES_CONTAINER + ',' + self._domain_validation_search_base
+        # search for things with the policy object class in the relevant container
+        policies = self.find_objects_with_attribute(ldap_constants.AD_ATTRIBUTE_OBJECT_CLASS,
+                                                    ldap_constants.GROUP_POLICY_CONTAINER_CLASS,
+                                                    attributes_to_lookup=['*'],
+                                                    object_class=ldap_constants.GROUP_POLICY_CONTAINER_CLASS,
+                                                    return_type=ADGroupPolicy,
+                                                    search_base=policy_loc)
+        return policies
+
     def find_supported_sasl_mechanisms_for_domain(self) -> List[str]:
         """ Attempt to discover the SASL mechanisms supported by the domain and return them.
         This just builds upon the functionality that the domain has for this, as you don't need
@@ -784,8 +802,11 @@ class ADSession:
 
     def find_objects_with_attribute(self, attribute_name: str, attribute_value, attributes_to_lookup: List[str] = None,
                                     size_limit: int = 0, object_class: str = None, return_type=None,
-                                    controls: List[Control] = None) -> List[Union[ADUser, ADComputer, ADObject,
-                                                                                  ADGroup]]:
+                                    controls: List[Control] = None, search_base: str = None) -> List[Union[ADUser,
+                                                                                                           ADComputer,
+                                                                                                           ADObject,
+                                                                                                           ADGroup,
+                                                                                                           ADGroupPolicy]]:
         """ Find all AD objects that possess the specified attribute with the specified value and return them.
 
         :param attribute_name: The LDAP name of the attribute to be used in the search.
@@ -802,6 +823,8 @@ class ADSession:
         :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
                          whether or not certain properties/attributes are critical, which influences whether a search
                          may succeed or fail based on their availability.
+        :param search_base: An alternate search base to use. If not specified, defaults to the session's domain
+                            search base.
         :returns: a list of ADObject objects representing groups with the specified value for the specified attribute.
         """
         if return_type is None:
@@ -826,8 +849,10 @@ class ADSession:
             attributes_to_lookup = [attribute_name]
         if attribute_name not in attributes_to_lookup:
             attributes_to_lookup.append(attribute_name)
+        if search_base is None:
+            search_base = self.domain_search_base
         # a size limit of 0 means unlimited
-        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+        res = self._find_ad_objects_and_attrs(search_base, search_filter, SUBTREE,
                                               attributes_to_lookup, size_limit, return_type, controls)
         logger.info('%s %s objects found with %s value %s', len(res), object_class, attribute_name, attribute_value)
         return res

@@ -54,7 +54,7 @@ adjusted in response to observed response sizes and network conditions.
 
     set_trusted_domain_cache_lifetime_seconds(self, new_lifetime_in_seconds: int)
 
-There are functions for finding domain resources, such as DNS servers, CA certificates, time, etc.
+There are functions for finding domain resources, such as DNS servers, CA certificates, policies time, etc.
 ::
 
     find_certificate_authorities_for_domain(self, pem_format: bool = True, controls: List[ldap3.protocol.rfc4511.Control] = None) -> Union[List[str], List[bytes]]
@@ -118,6 +118,13 @@ There are functions for finding domain resources, such as DNS servers, CA certif
         :param force_refresh: If set to true, the domain will be searched for the information even if
                               it is already cached. Defaults to false.
         :returns: A string indicating the netbios name of the domain.
+
+    find_policies_in_domain(self) -> List[ADGroupPolicy]:
+        Find all of the policy objects in this domain. The number of policies is often less than the
+        number of things affected by them, so querying all of them once and handling mapping locally is
+        more desirable than re-querying policies every time a container that bears policies is queried.
+
+        :returns: A list of ADGroupPolicy objects representing the policies in the domain.
 
     find_supported_sasl_mechanisms_for_domain(self) -> List[str]
         Attempt to discover the SASL mechanisms supported by the domain and return them.
