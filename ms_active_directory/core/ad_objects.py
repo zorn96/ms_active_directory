@@ -26,21 +26,26 @@
 import copy
 
 from ldap3.utils.dn import parse_dn
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 if TYPE_CHECKING:
     from ms_active_directory.core.ad_domain import ADDomain
 
 
 from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_COMMON_NAME,
+    AD_ATTRIBUTE_DISPLAY_NAME,
     AD_ATTRIBUTE_GID_NUMBER,
+    AD_ATTRIBUTE_GROUP_POLICY_LINK,
     AD_ATTRIBUTE_OBJECT_CLASS,
     AD_ATTRIBUTE_SAMACCOUNT_NAME,
     AD_ATTRIBUTE_UID_NUMBER,
     AD_ATTRIBUTE_UNIX_HOME_DIR,
     AD_ATTRIBUTE_UNIX_LOGIN_SHELL,
     COMPUTER_OBJECT_CLASS,
+    DOMAIN_OBJECT_CLASS,
     GROUP_OBJECT_CLASS,
+    GROUP_POLICY_CONTAINER_CLASS,
+    ORGANIZATIONAL_UNIT_OBJECT_CLASS,
     POSIX_GROUP_OBJECT_CLASS,
     POSIX_USER_OBJECT_CLASS,
     USER_OBJECT_CLASS,
@@ -62,11 +67,37 @@ def cast_ad_object_to_specific_object_type(ad_obj: 'ADObject'):
         obj_type = ADGroup
         if ad_obj.is_of_object_class(POSIX_GROUP_OBJECT_CLASS):
             obj_type = ADPosixGroup
+    elif ad_obj.is_of_object_class(ORGANIZATIONAL_UNIT_OBJECT_CLASS):
+        obj_type = ADOrganizationalUnit
+    elif ad_obj.is_of_object_class(DOMAIN_OBJECT_CLASS):
+        obj_type = ADDomainContainerObject
+    elif ad_obj.is_of_object_class(GROUP_POLICY_CONTAINER_CLASS):
+        obj_type = ADGroupPolicy
 
     # return as is if we can't find anything more specific
     if not obj_type:
         return ad_obj
     return obj_type(ad_obj.distinguished_name, ad_obj.all_attributes, ad_obj.domain)
+
+
+def parse_gplink_to_dn_list(group_policy_links_str: str) -> List[str]:
+    """ Given a gpLink attribute string, convert it to a list of policy distinguished names """
+    # format is a stringified list. for example
+    # '[LDAP://CN={6AC1786C-016F-11D2-945F-00C04fB984F9},CN=Policies,CN=System,DC=AZ,DC=LOCAL;0]'
+    # so remove the open and close bracket, and then split on "LDAP://"s
+    group_policy_links_str = group_policy_links_str[1:][:-1]
+    if group_policy_links_str.endswith(';0'):
+        group_policy_links_str = group_policy_links_str[:-2]
+    # we split on LDAP:// because ;s could be in DNs. but we'll need to remove trailing ;s at the end
+    group_policy_link_dns = group_policy_links_str.split('LDAP://')
+    filtered_trimmed_dns = []
+    for policy in group_policy_link_dns:
+        if not policy:
+            continue
+        if policy.endswith(';'):
+            policy = policy[:-1]
+        filtered_trimmed_dns.append(policy)
+    return filtered_trimmed_dns
 
 
 # the parent of all ADObjects, defined here to avoid risk of circular imports
@@ -89,6 +120,11 @@ class ADObject:
         superlative_dn_pieces_without_domain = [piece for piece in superlative_dn_pieces if piece[0].lower() != 'dc']
         reconstructed_pieces = [piece[0] + '=' + piece[1] + piece[2] for piece in superlative_dn_pieces_without_domain]
         self.location = ''.join(reconstructed_pieces)
+
+        # find any policies attached to the object if we have the right attributes
+        self.attached_policies = None
+        if AD_ATTRIBUTE_GROUP_POLICY_LINK in attributes and attributes.get(AD_ATTRIBUTE_GROUP_POLICY_LINK):
+            self.attached_policies = parse_gplink_to_dn_list(attributes.get(AD_ATTRIBUTE_GROUP_POLICY_LINK))
 
     def get(self, attribute_name: str, unpack_one_item_lists=False):
         """ Get an attribute about the group that isn't explicitly tracked as a member """
@@ -192,3 +228,29 @@ class ADPosixGroup(ADGroup):
         # gidNumber will come back as a singleton list
         if AD_ATTRIBUTE_GID_NUMBER in attributes and attributes.get(AD_ATTRIBUTE_GID_NUMBER):
             self.gid = int(attributes.get(AD_ATTRIBUTE_GID_NUMBER)[0])
+
+
+class ADDomainContainerObject(ADObject):
+
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
+        super().__init__(dn, attributes, domain)
+        # used for __repr__
+        self.class_name = 'ADDomainContainerObject'
+
+
+class ADOrganizationalUnit(ADObject):
+
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
+        super().__init__(dn, attributes, domain)
+        # used for __repr__
+        self.class_name = 'ADOrganizationalUnit'
+
+
+class ADGroupPolicy(ADObject):
+
+    def __init__(self, dn: str, attributes: dict, domain: 'ADDomain'):
+        super().__init__(dn, attributes, domain)
+        # used for __repr__
+        self.class_name = 'ADGroupPolicy'
+        if AD_ATTRIBUTE_DISPLAY_NAME in attributes and attributes.get(AD_ATTRIBUTE_DISPLAY_NAME):
+            self.name = attributes.get(AD_ATTRIBUTE_DISPLAY_NAME)

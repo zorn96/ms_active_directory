@@ -27,7 +27,9 @@ CERTIFICATE_AUTHORITY_OBJECT_CLASS = 'certificationAuthority'
 TRUSTED_DOMAIN_OBJECT_CLASS = 'trustedDomain'
 COMPUTER_OBJECT_CLASS = 'computer'
 CONTAINER_OBJECT_CLASS = 'container'
+DOMAIN_OBJECT_CLASS = 'domain'
 GROUP_OBJECT_CLASS = 'group'
+GROUP_POLICY_CONTAINER_CLASS = 'groupPolicyContainer'
 ORGANIZATIONAL_UNIT_OBJECT_CLASS = 'organizationalUnit'
 POSIX_GROUP_OBJECT_CLASS = 'posixGroup'
 POSIX_USER_OBJECT_CLASS = 'posixAccount'
@@ -53,6 +55,7 @@ AD_ATTRIBUTE_SAMACCOUNT_NAME = 'sAMAccountName'
 AD_ATTRIBUTE_SECURITY_DESCRIPTOR = 'ntSecurityDescriptor'
 AD_ATTRIBUTE_CANONICAL_NAME = 'canonicalName'
 AD_ATTRIBUTE_COMMON_NAME = 'cn'
+AD_ATTRIBUTE_DISPLAY_NAME = 'displayName'
 AD_ATTRIBUTE_NAME = 'name'
 AD_ATTRIBUTE_OBJECT_CLASS = 'objectClass'
 AD_ATTRIBUTE_OBJECT_SID = 'objectSID'
@@ -98,6 +101,9 @@ AD_TRUST_DIRECTION = 'trustDirection'  # disabled, incoming, outgoing, bidirecti
 AD_TRUST_ATTRIBUTES = 'trustAttributes'
 AD_TRUST_POSIX_OFFSET = 'trustPosixOffset'
 
+# keys related to policies
+AD_ATTRIBUTE_GROUP_POLICY_LINK = 'gpLink'
+
 
 # From windows AD docs
 AD_USERNAME_RESTRICTED_CHARS = {'[', ']', ':', ';', '|', '=', '+', '*', '?', '<', '>', '/', '\\',
@@ -117,6 +123,7 @@ DNS_SERVICE_FILTER = 'DNS/*'
 DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
 DOMAIN_CONTROLLER_SCHEMA_VERSION_SEARCH_CONTAINER = 'CN=schema,' + DOMAIN_WIDE_CONFIGURATIONS_CONTAINER
 DOMAIN_WIDE_PARTITIONS_CONTAINER = 'CN=Partitions,' + DOMAIN_WIDE_CONFIGURATIONS_CONTAINER
+DOMAIN_POLICIES_CONTAINER = 'CN=Policies,CN=System'
 
 # when checking if something simply exists, or getting everything at a level/subtree,
 # we use this filter
