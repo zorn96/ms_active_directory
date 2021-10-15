@@ -120,6 +120,9 @@ class ADObject:
         superlative_dn_pieces_without_domain = [piece for piece in superlative_dn_pieces if piece[0].lower() != 'dc']
         reconstructed_pieces = [piece[0] + '=' + piece[1] + piece[2] for piece in superlative_dn_pieces_without_domain]
         self.location = ''.join(reconstructed_pieces)
+        # remove trailing comma for a proper RDN
+        if self.location.endswith(','):
+            self.location = self.location[:-1]
 
         # find any policies attached to the object if we have the right attributes
         self.attached_policies = None
