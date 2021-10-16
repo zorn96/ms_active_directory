@@ -84,18 +84,15 @@ def parse_gplink_to_dn_list(group_policy_links_str: str) -> List[str]:
     """ Given a gpLink attribute string, convert it to a list of policy distinguished names """
     # format is a stringified list. for example
     # '[LDAP://CN={6AC1786C-016F-11D2-945F-00C04fB984F9},CN=Policies,CN=System,DC=AZ,DC=LOCAL;0]'
-    # so remove the open and close bracket, and then split on "LDAP://"s
-    group_policy_links_str = group_policy_links_str[1:][:-1]
-    if group_policy_links_str.endswith(';0'):
-        group_policy_links_str = group_policy_links_str[:-2]
-    # we split on LDAP:// because ;s could be in DNs. but we'll need to remove trailing ;s at the end
-    group_policy_link_dns = group_policy_links_str.split('LDAP://')
+    # so split on "[LDAP://"s and remove the trailing ;0] for each policy
+    group_policy_link_dns = group_policy_links_str.split('[LDAP://')
+    # we split on [LDAP:// because ;s could be in DNs. but we'll need to remove trailing ;0]s at the ends
     filtered_trimmed_dns = []
     for policy in group_policy_link_dns:
         if not policy:
             continue
-        if policy.endswith(';'):
-            policy = policy[:-1]
+        if policy.endswith(';0]'):
+            policy = policy[:-3]
         filtered_trimmed_dns.append(policy)
     return filtered_trimmed_dns
 
