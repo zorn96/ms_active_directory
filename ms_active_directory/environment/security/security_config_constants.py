@@ -29,6 +29,12 @@ from enum import Enum
 AD_PASSWORD_CHAR_RANGE = [chr(i) for i in range(33, 127)]
 
 
+class ADGroupPolicyState(Enum):
+    ENABLED = 0
+    DISABLED = 1
+    ENFORCED = 2
+
+
 class ADEncryptionType(Enum):
     DES_CBC_CRC = 1
     DES_CBC_MD5 = 2

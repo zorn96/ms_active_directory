@@ -26,7 +26,7 @@
 import copy
 
 from ldap3.utils.dn import parse_dn
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Tuple
 if TYPE_CHECKING:
     from ms_active_directory.core.ad_domain import ADDomain
 
@@ -52,6 +52,7 @@ from ms_active_directory.environment.ldap.ldap_constants import (
     UNKNOWN_GROUP_POSIX_GID,
     UNKNOWN_USER_POSIX_UID,
 )
+from ms_active_directory.environment.security.security_config_constants import ADGroupPolicyState
 
 
 def cast_ad_object_to_specific_object_type(ad_obj: 'ADObject'):
@@ -80,7 +81,7 @@ def cast_ad_object_to_specific_object_type(ad_obj: 'ADObject'):
     return obj_type(ad_obj.distinguished_name, ad_obj.all_attributes, ad_obj.domain)
 
 
-def parse_gplink_to_dn_list(group_policy_links_str: str) -> List[str]:
+def parse_gplink_to_dn_enablement_list(group_policy_links_str: str) -> List[Tuple[str, ADGroupPolicyState]]:
     """ Given a gpLink attribute string, convert it to a list of policy distinguished names """
     # format is a stringified list. for example
     # '[LDAP://CN={6AC1786C-016F-11D2-945F-00C04fB984F9},CN=Policies,CN=System,DC=AZ,DC=LOCAL;0]'
@@ -91,9 +92,15 @@ def parse_gplink_to_dn_list(group_policy_links_str: str) -> List[str]:
     for policy in group_policy_link_dns:
         if not policy:
             continue
-        if policy.endswith(';0]'):
-            policy = policy[:-3]
-        filtered_trimmed_dns.append(policy)
+        policy_enabled_disabled_enforced = None
+        if policy.endswith(';0]'):  # enabled
+            policy_enabled_disabled_enforced = ADGroupPolicyState.ENABLED
+        elif policy.endswith(';1]'):  # disabled
+            policy_enabled_disabled_enforced = ADGroupPolicyState.DISABLED
+        elif policy.endswith(';2]'):  # enforced = cannot be have inheritance broken on sub-OUs
+            policy_enabled_disabled_enforced = ADGroupPolicyState.ENFORCED
+        policy = policy[:-3]
+        filtered_trimmed_dns.append((policy, policy_enabled_disabled_enforced))
     return filtered_trimmed_dns
 
 
@@ -122,9 +129,14 @@ class ADObject:
             self.location = self.location[:-1]
 
         # find any policies attached to the object if we have the right attributes
-        self.attached_policies = None
+        self.attached_policies = []
+        self.policy_enablement_state_map = {}
         if AD_ATTRIBUTE_GROUP_POLICY_LINK in attributes and attributes.get(AD_ATTRIBUTE_GROUP_POLICY_LINK):
-            self.attached_policies = parse_gplink_to_dn_list(attributes.get(AD_ATTRIBUTE_GROUP_POLICY_LINK))
+            policy_enablement_tuples = parse_gplink_to_dn_enablement_list(
+                attributes.get(AD_ATTRIBUTE_GROUP_POLICY_LINK))
+            for policy_dn, enablement_enum in policy_enablement_tuples:
+                self.attached_policies.append(policy_dn.lower())
+                self.policy_enablement_state_map[policy_dn.lower()] = enablement_enum
 
     def get(self, attribute_name: str, unpack_one_item_lists=False):
         """ Get an attribute about the group that isn't explicitly tracked as a member """
@@ -140,6 +152,14 @@ class ADObject:
             return False
         obj_cls = obj_cls.lower()
         return obj_cls in [o_cls.lower() for o_cls in self.object_classes]
+
+    def has_policy_directly_enabled(self, policy_dn):
+        """ Returns True if a policy is directly attached to the object and is active """
+        policy_dn = policy_dn.lower()
+        if policy_dn not in self.policy_enablement_state_map:
+            return False
+        state = self.policy_enablement_state_map[policy_dn]
+        return state in [ADGroupPolicyState.ENABLED, ADGroupPolicyState.ENFORCED]
 
     def __repr__(self):
         attrs = self.all_attributes.__repr__() if self.all_attributes else 'None'
