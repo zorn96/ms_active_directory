@@ -108,9 +108,9 @@ def construct_object_distinguished_name(object_name: str, object_location: str, 
     """
     Constructs the distinguished name of a computer, group, or user given the name, join location, and domain.
     """
-    computer_part = 'CN=' + object_name
+    common_part = 'CN=' + object_name
     domain_part = construct_ldap_base_dn_from_domain(domain)
-    return ','.join([computer_part, object_location, domain_part])
+    return ','.join([common_part, object_location, domain_part])
 
 
 def construct_domain_from_ldap_base_dn(domain: str) -> str:
