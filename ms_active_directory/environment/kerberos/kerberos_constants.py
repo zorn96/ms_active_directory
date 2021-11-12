@@ -128,3 +128,30 @@ DEFAULT_UNKNOWN_NAME_TYPE = 0
 AD_DEFAULT_NAME_TYPE = 1
 
 DEFAULT_KRB5_KEYTAB_FILE_LOCATION = '/etc/krb5.keytab'
+# some posix-based operating systems have other kerberos configs (e.g. macOS uses a plist, some
+# linux versions use /etc/krb5/krb5.conf) but all of them support /etc/krb5.conf for compatibility
+POSIX_KRB5_CONF_LOCATION = '/etc/krb5.conf'
+# windows puts the krb5 config in an ini file, but its location has changed across versions.
+# for backwards compatibility, windows will always look in the old location even if the new
+# one exists, so we update all of them
+WINDOWS_KRB5_CONF_LOCATION_NEW = '/windows/krb5.ini'
+WINDOWS_KRB5_CONF_LOCATION_OLD = '/winnt/krb5.ini'
+
+# config file tags
+KRB5_CONF_DEFAULTS_TAG = '[libdefaults]'
+KRB5_CONF_REALMS_TAG = '[realms]'
+KRB5_CONF_DOMAIN_REALMS_TAG = '[domain_realm]'
+
+# config file format elements
+DEFAULT_REALM_FORMAT = '    default_realm = {realm}'
+# needs to use %s formatting due to brackets in the file
+REALM_ENTRY_FORMAT = """
+    %s = {
+        %s
+    }
+"""
+REALM_ENTRY_COMPONENT_FORMAT = """        {server_type} = {address}"""
+DOMAIN_REALM_MAP_FORMAT = """
+    {domain} = {realm}
+    .{domain} = {realm}
+"""
