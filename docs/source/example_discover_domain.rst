@@ -68,3 +68,47 @@ Here's an example of specifying which servers to communicate with, and CA certs 
     local_domain = ADDomain(example_domain_dns_name, ldap_servers_or_uris=[local_ldap_ip],
                             source_ip=local_ldap_ip, ca_certificates_file_path=private_securing_cas)
     global_domain = ADDomain(example_domain_dns_name, source_ip=public_machine_ip)
+
+
+Local System Configuration
+------------------------------------------
+By default, you'll need to configure your local system files to enable kerberos authentication to work properly.
+However, you can also automatically set up the krb5 configuration when creating a domain object.
+::
+    from ms_active_directory import ADDomain
+
+    example_domain_dns_name = 'example.com'
+    # set up the local system krb5 config based on discovered kerberos uris
+    domain = ADDomain(example_domain_dns_name,
+                      auto_configure_kerberos_client=True)
+
+The file configured will be ``/etc/krb5.conf`` on posix systems (e.g. macOS, Ubuntu), and on windows both
+``/winnt/krb5.ini`` and ``/windows/krb5.ini`` will be configured for backwards compatibility.
+By default, a new kerberos realm configuration will be merged into these files if they exist, or new files
+will be created if none exists.
+
+If you want to update a different configuration file, or if you want to overwrite the file instead of updating it,
+or if you want to set things like a default realm, you can also directly call the function for configuring the
+local system.
+::
+    from ms_active_directory.environment.kerberos.kerberos_client_configurer import update_system_kerberos_configuration_for_domains
+    from ms_active_directory import ADDomain
+
+    example_domain_dns_name = 'example.com'
+    domain = ADDomain(example_domain_dns_name)
+
+    # overwrite the existing file instead of updating it
+    update_system_kerberos_configuration_for_domains([domain], merge_with_existing_file=False)
+    # update a file in a different location
+    update_system_kerberos_configuration_for_domains([domain], krb5_location='/etc/user_100/krb5.conf')
+    # set a default authentication realm
+    update_system_kerberos_configuration_for_domains([domain], default_domain=domain)
+
+
+Note: if multiple ``ADDomain`` objects all attempt to configure the local system kerberos file, only one will "win".
+This means that if they have different sites specified, or used different source addresses on a network where
+kdc reachability is reliant on that source address, having a single ``ADDomain`` object automatically configure
+the krb5 configuration file can be risky.
+
+In these scenarios, it's recommended that you manually write the krb5 configuration or that you set up an ``ADDomain``
+object with kerberos uris for the entire domain and use that to initiate the auto-configuration.

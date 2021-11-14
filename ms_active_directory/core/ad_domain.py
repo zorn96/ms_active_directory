@@ -61,6 +61,7 @@ from ms_active_directory.environment.discovery.discovery_utils import discover_k
     discover_ldap_domain_controllers_in_domain
 from ms_active_directory.environment.format_utils import format_computer_name_for_authentication, \
     get_system_default_computer_name
+from ms_active_directory.environment.kerberos.kerberos_client_configurer import update_system_kerberos_configuration_for_domains
 from ms_active_directory.environment.kerberos.kerberos_constants import DEFAULT_KRB5_KEYTAB_FILE_LOCATION
 from ms_active_directory.environment.ldap import trust_constants
 from ms_active_directory.environment.ldap.ldap_constants import (
@@ -381,7 +382,8 @@ class ADDomain:
                  discover_kerberos_servers: bool = True,
                  dns_nameservers: List[str] = None,
                  source_ip: str = None,
-                 netbios_name: str = None):
+                 netbios_name: str = None,
+                 auto_configure_kerberos_client: bool = False):
         """ Initialize an interface for defining an AD domain and interacting with it.
         :param domain: The DNS name of the Active Directory domain that this object represents.
         :param site: The Active Directory site to operate within. This is only relevant if LDAP or
@@ -430,6 +432,8 @@ class ADDomain:
                              This can be set by users, but isn't needed. It's primarily here to avoid
                              extra lookups when creating ADDomain objects from ADTrustedDomain objects, as
                              the netbios name is already known.
+        :param auto_configure_kerberos_client: If true, automatically configure the local system to enable kerberos
+                                               communication with the domain.
         """
         self.domain = domain.lower()  # cast to lowercase
         self.site = site.lower() if site else None
@@ -441,6 +445,7 @@ class ADDomain:
         self.dns_nameservers = dns_nameservers
         self.source_ip = source_ip
         self.netbios_name = netbios_name
+        self.auto_configure_kerberos_client = auto_configure_kerberos_client
         # discover ldap servers and kerberos servers if we weren't provided any and weren't told not to
         if not ldap_servers_or_uris and discover_ldap_servers:
             ldap_servers_or_uris = discover_ldap_domain_controllers_in_domain(self.domain, site=self.site,
@@ -523,6 +528,10 @@ class ADDomain:
                 raise InvalidDomainParameterException('Invalid type for element of kerberos server list, {}; '
                                                       'elements must be strings'.format(type(serv)))
         self.kerberos_uris = kerberos_uris
+        # if this domain should automatically configure the local system's kerberos config, and we found
+        # kerberos uris, then do so
+        if self.kerberos_uris and self.auto_configure_kerberos_client:
+            update_system_kerberos_configuration_for_domains([self])
 
     def is_close_in_time_to_localhost(self, ldap_connection: Connection = None,
                                       allowed_drift_seconds: int = None) -> bool:
@@ -1005,8 +1014,8 @@ class ADDomain:
         """ A super simple 'join the domain' function that requires minimal input - just admin user credentials
         to use in the join process.
         Given those basic inputs, the domain's settings are used to establish a connection, and an account is taken over
-        based on inputs. The account's attributes are then read and used to generate kerberos keys and set other attributes
-        of the returned object.
+        based on inputs. The account's attributes are then read and used to generate kerberos keys and set other
+        attributes of the returned object.
         :param admin_username: The username of a user or computer with the rights to reset the password of the computer
                                being taken over.
                                This username should be formatted based on the authentication protocol being used.
@@ -1053,6 +1062,7 @@ class ADDomain:
         if self.site:
             result += ', site={}'.format(self.site)
         enc_connections = 'True' if self.encrypt_connections else 'False'
+        auto_configure = 'True' if self.auto_configure_kerberos_client else 'False'
         result += ', encrypt_connections=' + enc_connections
         if self.ldap_servers:
             list_repr = ','.join(serv.__repr__() for serv in self.ldap_servers)
@@ -1069,6 +1079,7 @@ class ADDomain:
             result += ', source_ip=' + self.source_ip
         if self.netbios_name:
             result += ', netbios_name=' + self.netbios_name
+        result += ', auto_configure_kerberos_client=' + auto_configure
         result += ')'
 
         return result

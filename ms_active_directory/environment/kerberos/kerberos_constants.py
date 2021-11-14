@@ -145,13 +145,11 @@ KRB5_CONF_DOMAIN_REALMS_TAG = '[domain_realm]'
 # config file format elements
 DEFAULT_REALM_FORMAT = '    default_realm = {realm}'
 # needs to use %s formatting due to brackets in the file
-REALM_ENTRY_FORMAT = """
-    %s = {
+REALM_ENTRY_FORMAT = """    %s = {
         %s
     }
 """
 REALM_ENTRY_COMPONENT_FORMAT = """        {server_type} = {address}"""
-DOMAIN_REALM_MAP_FORMAT = """
-    {domain} = {realm}
+DOMAIN_REALM_MAP_FORMAT = """    {domain} = {realm}
     .{domain} = {realm}
 """

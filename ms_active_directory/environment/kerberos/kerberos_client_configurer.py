@@ -32,11 +32,14 @@ def update_system_kerberos_configuration_for_domains(ad_domains: List['ADDomain'
 
     :param ad_domains: A list of ADDomain objects representing the domains.
     :param default_domain: Optional. If specified, this domain will be configured as the default domain.
-    :param merge_with_existing_file:
-    :param krb5_location:
-    :return:
+    :param merge_with_existing_file: If False, overwrite the kerberos configuration file instead of merging the domain's
+                                     realm entries into the existing file. Defaults to True.
+    :param krb5_location: The file path to the kerberos configuration to update. If not specified, defaults to
+                          `/windows/krb5.ini` and `/winnt/krb5.ini` on windows systems and `/etc/krb5.conf` on others.
+    :raises: SystemConfigurationUpdateException if we fail to update the configuration files.
     """
     realm_entries = []
+    realms = []
     domain_realm_map_entries = []
     default_realm_entry = None
     for domain in ad_domains:
@@ -47,6 +50,7 @@ def update_system_kerberos_configuration_for_domains(ad_domains: List['ADDomain'
         realm_entry = REALM_ENTRY_FORMAT % (realm, '\n'.join(realm_components))
         mapping_entry = DOMAIN_REALM_MAP_FORMAT.format(domain=lower_mapped_domain,
                                                        realm=realm)
+        realms.append(realm)
         realm_entries.append(realm_entry)
         domain_realm_map_entries.append(mapping_entry)
 
@@ -78,7 +82,7 @@ def update_system_kerberos_configuration_for_domains(ad_domains: List['ADDomain'
         if default_realm_entry:
             current_krb5_lines = [line for line in current_krb5_lines
                                   if not line.strip().startswith('default_ream')]
-        krb5_contents = _combine_realms_into_current_krb5_file(current_krb5_lines, realm_entries,
+        krb5_contents = _combine_realms_into_current_krb5_file(current_krb5_lines, realms, realm_entries,
                                                                domain_realm_map_entries, default_realm_entry)
 
     # if the caller set the output location, we need to succeed in updating it or we'll raise an error.
@@ -106,20 +110,15 @@ def update_system_kerberos_configuration_for_domains(ad_domains: List['ADDomain'
 def _build_krb5_conf_file(realm_entries: List[str], domain_realm_map_entries: List[str],
                           default_realm_entry: str = None) -> str:
     """ Create a krb5.conf file given the default realm (if any) and the entries for the realms and their domain
-    mappings
-
-    :param realm_entries:
-    :param domain_realm_map_entries:
-    :param default_realm_entry:
-    :return:
+    mappingsg
     """
     prefix = ''
     if default_realm_entry:
-        prefix = KRB5_CONF_DEFAULTS_TAG + '\n' + default_realm_entry + '\n'
+        prefix = KRB5_CONF_DEFAULTS_TAG + '\n' + default_realm_entry
 
-    realms = KRB5_CONF_REALMS_TAG + '\n' + '\n'.join(realm_entries) + '\n'
-    domain_mappings = KRB5_CONF_DOMAIN_REALMS_TAG + '\n' + '\n'.join(domain_realm_map_entries) + '\n'
-    return '\n'.join([prefix, realms, domain_mappings]) + '\n'
+    realms = KRB5_CONF_REALMS_TAG + '\n' + '\n'.join(realm_entries)
+    domain_mappings = KRB5_CONF_DOMAIN_REALMS_TAG + '\n' + '\n'.join(domain_realm_map_entries)
+    return '\n'.join([prefix, realms, domain_mappings])
 
 
 def _read_existing_krb5_conf_file_lines(locations: List[str]) -> Tuple[Optional[str], List[str]]:
@@ -134,16 +133,11 @@ def _read_existing_krb5_conf_file_lines(locations: List[str]) -> Tuple[Optional[
     return None, []
 
 
-def _combine_realms_into_current_krb5_file(current_krb5_lines: List[str], realm_entries: List[str],
+def _combine_realms_into_current_krb5_file(current_krb5_lines: List[str], realms: List[str], realm_entries: List[str],
                                            domain_realm_map_entries: List[str],
                                            default_realm_entry: str = None) -> str:
-    """
-
-    :param current_krb5_lines:
-    :param realm_entries:
-    :param domain_realm_map_entries:
-    :param default_realm_entry:
-    :return:
+    """ Merge realm entries and domain->realm mappings into an existing krb5 configuration file's contents.
+    If the realms we have entries for are already existing in the configuration file, they're removed and replaced.
     """
     final_lines = []
     realm_inserts = '\n'.join(realm_entries)
@@ -151,7 +145,28 @@ def _combine_realms_into_current_krb5_file(current_krb5_lines: List[str], realm_
     domain_mapping_inserts = '\n'.join(domain_realm_map_entries)
     domain_mappings_inserted = False
     default_realm_inserted = True if default_realm_entry is None else False
+    currently_skipping_realm = None
     for line in current_krb5_lines:
+        # firstly, if we're currently skipping a realm, skip this line and end the skipping if the line is the closing
+        # tag for the reaqulm
+        if currently_skipping_realm and line.strip() != '}':
+            print('Skipping line {line} of existing configuration for {realm} because we are overwriting it.'
+                        .format(line=line, realm=currently_skipping_realm))
+            continue
+        if currently_skipping_realm and line.strip() == '}':
+            currently_skipping_realm = None
+            print('Final line of configuration for {realm} seen. Done skipping {realm}'
+                        .format(realm=currently_skipping_realm))
+            continue
+
+        # if we're not actively skipping a realm's configuration, check if we should start
+        line_pieces = [piece.strip() for piece in line.split('=')]
+        if line_pieces[0] in realms and line_pieces[1] == '{':
+            currently_skipping_realm = line_pieces[0]
+            print('Starting to skip realm {realm} in existing configuration because we are overwriting it.'
+                        .format(realm=currently_skipping_realm))
+            continue
+
         final_lines.append(line)
         # if we've reached the krb5 defaults, and have a default realm entry, insert it
         if line.strip() == KRB5_CONF_DEFAULTS_TAG and default_realm_entry:
