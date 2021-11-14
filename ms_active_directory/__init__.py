@@ -62,6 +62,9 @@ from ms_active_directory.environment.kerberos.kerberos_raw_key_generator import 
     ad_password_string_to_key,
     password_string_to_key
 )
+from ms_active_directory.environment.kerberos.kerberos_client_configurer import (
+    update_system_kerberos_configuration_for_domains
+)
 
 from ms_active_directory.environment.ldap.ldap_constants import *
 
