@@ -70,8 +70,8 @@ AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'
 AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES = 'servicePrincipalName'
 AD_ATTRIBUTE_PASSWORD = 'unicodePwd'
 AD_ATTRIBUTE_USER_PRINCIPAL_NAME = 'userPrincipalName'
-AD_ATTRIBUTE_GIVEN_NAME = 'givenName'
-AD_ATTRIBUTE_SN = 'sn'
+AD_ATTRIBUTE_GIVEN_NAME = 'givenName'  # user's given name (first name)
+AD_ATTRIBUTE_SURNAME = 'sn'  # user's surname (last name)
 AD_ATTRIBUTE_PRIMARY_GROUP_ID = 'primaryGroupID'
 # memberOf is a virtual attribute on users and groups, listing the DNs of groups that the record
 # belongs to. it's less efficient to query because it's constructed on-demand in a lot of scenarios,
@@ -85,7 +85,7 @@ AD_ATTRIBUTE_UID_NUMBER = 'uidNumber'  # posix user uid (uid is user name for ld
 AD_ATTRIBUTE_GID_NUMBER = 'gidNumber'  # posix group gid, or primary gid for user
 AD_ATTRIBUTE_UNIX_HOME_DIR = 'unixHomeDirectory'  # homedir for a posix user
 AD_ATTRIBUTE_UNIX_LOGIN_SHELL = 'loginShell'  # the login shell a user uses, e.g. /bin/bash, /bin/zsh
-AD_ATTRIBUTE_GECOS = 'gecos'
+AD_ATTRIBUTE_GECOS = 'gecos'  # the unix attribute containing the user's full name
 
 # keys for attributes that are relatively computer-specific
 AD_ATTRIBUTE_ENCRYPTION_TYPES = 'msDS-SupportedEncryptionTypes'

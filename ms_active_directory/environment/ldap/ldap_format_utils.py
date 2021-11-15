@@ -113,13 +113,16 @@ def construct_object_distinguished_name(object_name: str, object_location: str, 
     return ','.join([common_part, object_location, domain_part])
 
 
-def construct_ou_distinguished_name(ou_name: str, domain: str) -> str:
+def construct_ou_distinguished_name(ou_name: str, domain: str, object_location: str = '') -> str:
     """
-    Constructs the distinguished name of an organizational unit given the name and domain.
+    Constructs the distinguished name of an organizational unit given the ou name, join location, and domain.
     """
     ou_part = 'OU=' + ou_name
     domain_part = construct_ldap_base_dn_from_domain(domain)
-    return ','.join([ou_part, domain_part])
+    parts = [ou_part, domain_part]
+    if object_location:
+        parts.insert(1, object_location)
+    return ','.join(parts)
 
 
 def construct_domain_from_ldap_base_dn(domain: str) -> str:

@@ -264,21 +264,18 @@ class ADSession:
                                                                                       result))
 
     def create_group(self, group_name: str, object_location: str, **additional_group_attributes) -> ADGroup:
-        """ Use the session to create a computer in the domain and return a computer object.
-        :param group_name: The common name of the group to create in the AD domain. This
-                              will be used to determine the sAMAccountName, and if no hostnames
-                              are specified then this will be used to determine the hostnames for
-                              the computer.
-        :param object_location: The distinguished name of the location within the domain where
-                                  the group will be created. It may be a relative distinguished
-                                  name (not including the domain component) or a full distinguished
-                                  name.  If not specified, defaults to CN=Users which is
-                                  standard for Active Directory.
-        :param additional_group_attributes: Additional LDAP attributes to set on the group and their
-                                              values. This is used to support power users setting arbitrary
-                                              attributes. This also allows overriding of some values that are
-                                              not explicit keyword arguments in order to avoid over-complication,
-                                              since most people won't set them (e.g. userAccountControl).
+        """ Use the session to create a group in the domain and return a group object.
+        :param group_name: The common name of the group to create in the AD domain. This will be used to determine
+                           the sAMAccountName for the group.
+        :param object_location: The distinguished name of the location within the domain where the group will be
+                                created. It may be a relative distinguished name (not including the domain component)
+                                or a full distinguished name.  If not specified, defaults to CN=Users which is
+                                standard for Active Directory.
+        :param additional_group_attributes: Additional LDAP attributes to set on the group and their values.
+                                            This is used to support power users setting arbitrary attributes.
+                                            This also allows overriding of some values that are not explicit keyword
+                                            arguments in order to avoid over-complication, since most people won't
+                                            set them (e.g. userAccountControl).
         :returns: an ADGroup object representing the group.
         :raises: ObjectCreationException if we fail to create the group for a reason unrelated to what we can
                  easily validate in advance (e.g. permission issue)
@@ -292,6 +289,7 @@ class ADSession:
                                           'created with the name {}'.format(group_name, group_name))
 
         # get or normalize our group location. the end format is as a relative distinguished name
+        # TODO: create helper function that normalizes an object location
         if object_location is None:
             object_location = ldap_constants.DEFAULT_USER_GROUP_LOCATION
         else:
@@ -327,13 +325,10 @@ class ADSession:
         group_attributes = {
             ldap_constants.AD_ATTRIBUTE_COMMON_NAME: group_name,
             ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME: group_name,
-            ldap_constants.AD_ATTRIBUTE_NAME: group_name,
         }
-        # don't include additional attributes for logging in case they're sensitive
-        loggable_attributes = copy.deepcopy(group_attributes)
         logger.info(
             'Attempting to create group in domain %s with the following LDAP attributes: %s and %s additional '
-            'attributes', self.domain_dns_name, loggable_attributes, len(additional_group_attributes))
+            'attributes', self.domain_dns_name, group_attributes, len(additional_group_attributes))
 
         # add in our additional account attributes at the end so they can override anything we set here
         group_attributes.update(additional_group_attributes)
@@ -977,25 +972,6 @@ class ADSession:
         res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
                                               attributes_to_lookup, 0, ADGroup, controls)
         logger.info('%s groups found with common name %s', len(res), group_name)
-        return res
-
-    def find_groups_in_ou(self, ou_name: str, attributes_to_lookup: List[str] = None,
-                          controls: List[Control] = None) -> List[ADGroup]:
-        """ Find all groups within a given organizational unit and return a list of ADGroup objects.
-
-        :param ou_name: The name of the organizational unit where the group(s) are located.
-        :param attributes_to_lookup: A list of additional LDAP attributes to query for the group. Regardless of
-                                     what's specified, the groups' name and object class attributes will be queried.
-        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
-                         whether or not certain properties/attributes are critical, which influences whether a search
-                         may succeed or fail based on their availability.
-        :returns: a list of ADGroup objects representing groups with the specified organizational unit.
-        """
-        ou_dn = ldap_utils.construct_ou_distinguished_name(ou_name, self.domain_dns_name)
-        # a size limit of 0 means unlimited
-        res = self._find_ad_objects_and_attrs(ou_dn, ldap_constants.FIND_GROUP_FILTER, SUBTREE,
-                                              attributes_to_lookup, 0, ADGroup, controls)
-        logger.info('%s groups found within organizational unit %s', len(res), ou_name)
         return res
 
     def find_group_by_distinguished_name(self, group_dn: str, attributes_to_lookup: List[str] = None,
