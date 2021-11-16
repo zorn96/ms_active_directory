@@ -35,9 +35,13 @@ POSIX_GROUP_OBJECT_CLASS = 'posixGroup'
 POSIX_USER_OBJECT_CLASS = 'posixAccount'
 USER_OBJECT_CLASS = 'user'
 TOP_OBJECT_CLASS = 'top'
+PERSON_OBJECT_CLASS = 'person'
+ORGANIZATIONAL_PERSON_OBJECT_CLASS = 'organizationalPerson'
 # computers also have the user object class because they can act as users to operate
 # within the domain, be a part of groups, etc.
 OBJECT_CLASSES_FOR_COMPUTER = [COMPUTER_OBJECT_CLASS, USER_OBJECT_CLASS, TOP_OBJECT_CLASS]
+OBJECT_CLASSES_FOR_USER = [TOP_OBJECT_CLASS, PERSON_OBJECT_CLASS, ORGANIZATIONAL_PERSON_OBJECT_CLASS, USER_OBJECT_CLASS]
+OBJECT_CLASSES_FOR_GROUP = [TOP_OBJECT_CLASS, GROUP_OBJECT_CLASS]
 
 # computers have an account control that determines things like whether they're trusted
 # for
@@ -65,6 +69,10 @@ AD_ATTRIBUTE_NETBIOS_NAME = 'nETBIOSName'
 AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'
 AD_ATTRIBUTE_SERVICE_PRINCIPAL_NAMES = 'servicePrincipalName'
 AD_ATTRIBUTE_PASSWORD = 'unicodePwd'
+AD_ATTRIBUTE_USER_PRINCIPAL_NAME = 'userPrincipalName'
+AD_ATTRIBUTE_GIVEN_NAME = 'givenName'  # user's given name (first name)
+AD_ATTRIBUTE_SURNAME = 'sn'  # user's surname (last name)
+AD_ATTRIBUTE_PRIMARY_GROUP_ID = 'primaryGroupID'
 # memberOf is a virtual attribute on users and groups, listing the DNs of groups that the record
 # belongs to. it's less efficient to query because it's constructed on-demand in a lot of scenarios,
 # and so we don't query for it by default, but use it if a user does query for it
@@ -77,6 +85,7 @@ AD_ATTRIBUTE_UID_NUMBER = 'uidNumber'  # posix user uid (uid is user name for ld
 AD_ATTRIBUTE_GID_NUMBER = 'gidNumber'  # posix group gid, or primary gid for user
 AD_ATTRIBUTE_UNIX_HOME_DIR = 'unixHomeDirectory'  # homedir for a posix user
 AD_ATTRIBUTE_UNIX_LOGIN_SHELL = 'loginShell'  # the login shell a user uses, e.g. /bin/bash, /bin/zsh
+AD_ATTRIBUTE_GECOS = 'gecos'  # the unix attribute containing the user's full name
 
 # keys for attributes that are relatively computer-specific
 AD_ATTRIBUTE_ENCRYPTION_TYPES = 'msDS-SupportedEncryptionTypes'
@@ -119,6 +128,7 @@ LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT = 16
 # related constants for domain-scope properties like dns servers and CAs
 DEFAULT_COMPUTER_SERVICES = ['HOST']
 DEFAULT_COMPUTER_LOCATION = 'CN=Computers'
+DEFAULT_USER_GROUP_LOCATION = 'CN=Users'
 DNS_SERVICE_FILTER = 'DNS/*'
 DOMAIN_WIDE_CONFIGURATIONS_CONTAINER = 'CN=Configuration'
 DOMAIN_CONTROLLER_SCHEMA_VERSION_SEARCH_CONTAINER = 'CN=schema,' + DOMAIN_WIDE_CONFIGURATIONS_CONTAINER
