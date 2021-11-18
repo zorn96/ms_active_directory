@@ -263,9 +263,11 @@ class ADSession:
                                       'and object classes {}. LDAP result: {}'.format(object_dn, object_classes,
                                                                                       result))
 
-    def create_user(self, username: str, first_name: str, last_name: str, object_location: str,
-                    **additional_user_attributes) -> ADUser:
-        """ Use the session to create a user in the domain and return a user object.
+    def create_unmanaged_user(self, username: str, first_name: str, last_name: str, object_location: str,
+                              common_name: str = None, supports_legacy_behavior: bool = False,
+                              **additional_user_attributes) -> ADUser:
+        """ Use the session to create an unmanaged user in the domain and return a user object. This does not
+        configure any auth mechanisms for the user like a password or kerberos keys.
         :param username: The login username for the user to create in the AD domain. This will be used to determine
                          the sAMAccountName for the user.
         :param first_name: The first name (given name) of the user to create in the AD domain. This will used for the
@@ -276,6 +278,12 @@ class ADSession:
                                 created. It may be a relative distinguished name (not including the domain component)
                                 or a full distinguished name.  If not specified, defaults to CN=Users which is
                                 standard for Active Directory.
+        :param common_name: The common name for the user. If unspecified, defaults to 'first_name last_name'.
+                            This is used as the common name in the user's distinguished name and the displayName
+                            attribute.
+        :param supports_legacy_behavior: Does the user being created support legacy behavior such as NTLM
+                                         authentication or UNC path addressing from older windows clients?
+                                         Defaults to False. Impacts the restrictions on user naming.
         :param additional_user_attributes: Additional LDAP attributes to set on the user and their values.
                                            This is used to support power users setting arbitrary attributes.
                                            This also allows overriding of some values that are not explicit keyword
@@ -286,9 +294,12 @@ class ADSession:
                  easily validate in advance (e.g. permission issue)
         """
         logger.debug('Request to create user in domain %s with the following attributes: username=%s, '
-                     'first_name=%s, last_name=%s, object_location=%s, number of additional attributes specified: %s',
-                     self.domain_dns_name, first_name, last_name, object_location, len(additional_user_attributes))
+                     'first_name=%s, last_name=%s, object_location=%s, supports_legacy_behavior=%s, number of '
+                     'additional attributes specified: %s', self.domain_dns_name, first_name, last_name,
+                     object_location, supports_legacy_behavior, len(additional_user_attributes))
 
+        # validate our username
+        username = ldap_utils.validate_and_normalize_common_name(username, supports_legacy_behavior)
         if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, username):
             raise ObjectCreationException('An object already exists with sAMAccountName {} so a user may not be '
                                           'created with the username {}'.format(username, username))
@@ -318,21 +329,22 @@ class ADSession:
             # location
             object_location = ldap_utils.normalize_object_location_in_domain(location_obj.distinguished_name,
                                                                              self.domain_dns_name)
-        # construct display name from first and last names
-        display_name = first_name + ' ' + last_name
+        # construct common name from first and last names if not specified
+        if not common_name:
+            common_name = first_name + ' ' + last_name
         # now we can build our full object distinguished name
-        user_dn = ldap_utils.construct_object_distinguished_name(display_name, object_location, self.domain_dns_name)
+        user_dn = ldap_utils.construct_object_distinguished_name(common_name, object_location, self.domain_dns_name)
         if self.dn_exists_in_domain(user_dn):
             raise ObjectCreationException('There exists an object in the domain with distinguished name {} and so a '
                                           'user may not be created in the domain with name {} in location {}. '
                                           'Please use a different name or location.'
-                                          .format(user_dn, user_dn, object_location))
+                                          .format(user_dn, common_name, object_location))
 
         # construct userPrincipalName from username and domain
         user_principal_name = username + '@' + self.domain_dns_name
 
         user_attributes = {
-            ldap_constants.AD_ATTRIBUTE_DISPLAY_NAME: display_name,
+            ldap_constants.AD_ATTRIBUTE_DISPLAY_NAME: common_name,
             ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME: username,
             ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME: user_principal_name,
             ldap_constants.AD_ATTRIBUTE_GIVEN_NAME: first_name,
@@ -476,7 +488,7 @@ class ADSession:
                      computer_location, encryption_types, hostnames, services, supports_legacy_behavior,
                      len(additional_account_attributes))
         # validate our computer name and then determine our sAMAccountName
-        computer_name = ldap_utils.validate_and_normalize_computer_name(computer_name, supports_legacy_behavior)
+        computer_name = ldap_utils.validate_and_normalize_common_name(computer_name, supports_legacy_behavior)
         samaccount_name = computer_name + '$'
 
         if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, samaccount_name):

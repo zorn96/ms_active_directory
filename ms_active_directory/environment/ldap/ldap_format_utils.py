@@ -349,9 +349,9 @@ def strip_domain_from_object_location(location: str, domain_dns_name: str) -> st
     return location
 
 
-def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bool) -> str:
-    """ Computer common names are sAMAccountNames without the $ at the end. So check for allowable
-    characters and length limits.
+def validate_and_normalize_common_name(name: str, supports_legacy_behavior: bool) -> str:
+    """ Common names are sAMAccountNames without the $ at the end. So check for allowable characters and length limits
+    with the option to support legacy behavior.
     """
     limit = LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT if supports_legacy_behavior else SAM_ACCOUNT_NAME_LENGTH
     # peel off the ending $ if present
@@ -359,10 +359,10 @@ def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bo
         name = name[:-1]
     if len(name) > limit:
         insert = 'support' if supports_legacy_behavior else 'do not support'
-        raise InvalidDomainParameterException('Computer name length must be fewer than {} characters for computers '
+        raise InvalidDomainParameterException('Common name length must be fewer than {} characters for accounts '
                                               'that {} legacy behavior.'.format(limit, insert))
     for character in AD_USERNAME_RESTRICTED_CHARS:
         if character in name:
-            raise InvalidDomainParameterException('AD computer names may not contain any of the following characters: '
+            raise InvalidDomainParameterException('Common names may not contain any of the following characters: '
                                                   '{}'.format(', '.join(AD_USERNAME_RESTRICTED_CHARS)))
     return name
