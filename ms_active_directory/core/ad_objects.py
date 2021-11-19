@@ -170,6 +170,14 @@ class ADObject:
     def __str__(self):
         return self.__repr__()
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+        return other.distinguished_name == self.distinguished_name and other.domain == self.domain
+
+    def __hash__(self):
+        return hash((self.distinguished_name, self.domain))
+
 
 class ADComputer(ADObject):
 
