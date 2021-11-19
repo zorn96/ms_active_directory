@@ -190,7 +190,7 @@ class ADObject:
         # use those, as well as using their 'whenChanged', to build your own hash so that the hash changes whenever the
         # object changes
         # this provides basic hash functionality without requiring permission to read those attributes
-        return hash((self.distinguished_name, self.domain.get_domain_dns_name(), self.object_classes))
+        return hash((self.distinguished_name, self.domain.get_domain_dns_name(), tuple(self.object_classes)))
 
 
 class ADComputer(ADObject):
