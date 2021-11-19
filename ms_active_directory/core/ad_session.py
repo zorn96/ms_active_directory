@@ -1877,6 +1877,49 @@ class ADSession:
         return self.find_groups_for_entities(computers, attributes_to_lookup, self.find_computer_by_name, controls,
                                              skip_validation=skip_validation)
 
+    def find_primary_group_for_account(self, account: Union[str, ADUser, ADComputer],
+                                       attributes_to_lookup: List[str] = None, controls: List[Control] = None,
+                                       skip_validation: bool = False) -> Optional[ADGroup]:
+        """ Find the primary group that an account belongs to, look up its attributes, and return information about it.
+
+        :param account: The account to lookup primary group membership. This can either be an ADUser, ADComputer, or a
+                        string name of an AD account. If it is a string, the account will be looked up first to get
+                        unique distinguished name information about it unless it is a distinguished name.
+        :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: An ADGroup object representing the primary group for the account or none if it doesn't exist.
+        :raises: InvalidLdapParameterException if the account is not a string, ADUser, or ADComputer.
+        :raises: ObjectNotFoundException if the account cannot be found.
+        :raises: TODO
+        """
+        # get objectSid and primaryGroupID attributes for account
+        attributes = [ldap_constants.AD_ATTRIBUTE_OBJECT_SID, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
+        if isinstance(account, ADUser) or isinstance(account, ADComputer):
+            # if our account is an ADUser or ADComputer, we can do the lookup by DN which is most efficient
+            informed_account = self.find_user_by_distinguished_name(account.distinguished_name, attributes,
+                                                                    controls=controls)
+        elif isinstance(account, str):
+            informed_account = self.find_user_by_name(account, attributes, controls=controls)
+        else:
+            raise InvalidLdapParameterException('The account must be either a string, ADUser object, or ADComputer '
+                                                'object. {} is not of these types.'.format(account))
+        if informed_account is None:
+            raise ObjectNotFoundException('No group could be found in the domain with the Group object class using '
+                                          'group {}'.format(account))
+
+        account_sid = informed_account.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
+        primary_group_id = informed_account.get(ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID)
+
+        # get the objectSid for the primary group given the account's objectSid and the primaryGroupID
+        group_sid = ldap_utils.construct_primary_group_sid(account_sid, primary_group_id)
+        return self.find_group_by_sid(group_sid, attributes_to_lookup, controls)
+
     def find_members_of_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
                               controls: List[Control] = None,
                               skip_validation: bool = False) -> List[Union[ADUser, ADGroup, ADComputer, ADObject]]:
