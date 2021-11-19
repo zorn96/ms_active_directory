@@ -33,8 +33,9 @@ For more detailed documentation, please see the docs at:\
    for nested groups.
 9. Adding and removing users, computers, and groups to and from other groups
 10. Account management functionality for both users and computers, such as password changes/resets, enabling, disabling, and unlocking accounts
-12. Looking up information about the permissions set on a user, computer, group, or generic object
-13. Adding permissions to the security descriptor for a user, computer, group, or generic object
+11. Looking up information about the permissions set on a user, computer, group, or generic object
+12. Adding permissions to the security descriptor for a user, computer, group, or generic object
+13. Support for creating users and groups
 14. Support for updating attributes of users, computers, groups, and generic objects. Support exists for atomically appending 
     or overwriting values.
 15. Support for finding policies within a domain, and for finding the policies directly attached to any given object.

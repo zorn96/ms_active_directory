@@ -299,36 +299,16 @@ class ADSession:
                      object_location, supports_legacy_behavior, len(additional_user_attributes))
 
         # validate our username
-        username = ldap_utils.validate_and_normalize_common_name(username, supports_legacy_behavior)
+        username = ldap_utils.validate_and_normalize_logon_name(username, supports_legacy_behavior)
         if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, username):
             raise ObjectCreationException('An object already exists with sAMAccountName {} so a user may not be '
                                           'created with the username {}'.format(username, username))
 
         # get or normalize our object location. the end format is as a relative distinguished name
-        # TODO: create helper function that normalizes an object location
-        if object_location is None:
-            object_location = ldap_constants.DEFAULT_USER_GROUP_LOCATION
-        else:
-            object_location = ldap_utils.normalize_object_location_in_domain(object_location, self.domain_dns_name)
-            # make sure our location exists
-            if ldap_utils.is_dn(object_location):
-                location_obj = self.find_object_by_distinguished_name(object_location)
-            else:
-                location_obj = self.find_object_by_canonical_name(object_location)
-            if location_obj is None:
-                raise ObjectCreationException('The user location {} cannot be found in the domain.'
-                                              .format(object_location))
-            # make sure our location is a container
-            is_container_or_ou = (location_obj.is_of_object_class(ldap_constants.ORGANIZATIONAL_UNIT_OBJECT_CLASS)
-                                  or location_obj.is_of_object_class(ldap_constants.CONTAINER_OBJECT_CLASS))
-            if not is_container_or_ou:
-                raise ObjectCreationException('The specified user location {} exists, but is not a container or an '
-                                              'organizational unit, and so a group cannot be created there.'
-                                              .format(location_obj.distinguished_name))
-            # make sure that going forward we have an LDAP-style relative distinguished name for our
-            # location
-            object_location = ldap_utils.normalize_object_location_in_domain(location_obj.distinguished_name,
-                                                                             self.domain_dns_name)
+        object_location = self.validate_location_for_creation_or_movement_and_get_dn(
+            object_location,
+            ldap_constants.DEFAULT_USER_GROUP_LOCATION
+        )
         # construct common name from first and last names if not specified
         if not common_name:
             common_name = first_name + ' ' + last_name
@@ -387,30 +367,10 @@ class ADSession:
                                           'created with the name {}'.format(group_name, group_name))
 
         # get or normalize our group location. the end format is as a relative distinguished name
-        # TODO: create helper function that normalizes an object location
-        if object_location is None:
-            object_location = ldap_constants.DEFAULT_USER_GROUP_LOCATION
-        else:
-            object_location = ldap_utils.normalize_object_location_in_domain(object_location, self.domain_dns_name)
-            # make sure our location exists
-            if ldap_utils.is_dn(object_location):
-                location_obj = self.find_object_by_distinguished_name(object_location)
-            else:
-                location_obj = self.find_object_by_canonical_name(object_location)
-            if location_obj is None:
-                raise ObjectCreationException('The group location {} cannot be found in the domain.'
-                                              .format(object_location))
-            # make sure our location is a container
-            is_container_or_ou = (location_obj.is_of_object_class(ldap_constants.ORGANIZATIONAL_UNIT_OBJECT_CLASS)
-                                  or location_obj.is_of_object_class(ldap_constants.CONTAINER_OBJECT_CLASS))
-            if not is_container_or_ou:
-                raise ObjectCreationException('The specified group location {} exists, but is not a container or an '
-                                              'organizational unit, and so a group cannot be created there.'
-                                              .format(location_obj.distinguished_name))
-            # make sure that going forward we have an LDAP-style relative distinguished name for our
-            # location
-            object_location = ldap_utils.normalize_object_location_in_domain(location_obj.distinguished_name,
-                                                                             self.domain_dns_name)
+        object_location = self.validate_location_for_creation_or_movement_and_get_dn(
+            object_location,
+            ldap_constants.DEFAULT_USER_GROUP_LOCATION
+        )
 
         # now we can build our full object distinguished name
         group_dn = ldap_utils.construct_object_distinguished_name(group_name, object_location,
@@ -488,7 +448,7 @@ class ADSession:
                      computer_location, encryption_types, hostnames, services, supports_legacy_behavior,
                      len(additional_account_attributes))
         # validate our computer name and then determine our sAMAccountName
-        computer_name = ldap_utils.validate_and_normalize_common_name(computer_name, supports_legacy_behavior)
+        computer_name = ldap_utils.validate_and_normalize_logon_name(computer_name, supports_legacy_behavior)
         samaccount_name = computer_name + '$'
 
         if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, samaccount_name):
@@ -496,30 +456,10 @@ class ADSession:
                                       'created with the name {}'.format(samaccount_name, computer_name))
 
         # get or normalize our computer location. the end format is as a relative distinguished name
-        if computer_location is None:
-            computer_location = ldap_constants.DEFAULT_COMPUTER_LOCATION
-        else:
-            computer_location = ldap_utils.normalize_object_location_in_domain(computer_location,
-                                                                               self.domain_dns_name)
-            # make sure our location exists
-            if ldap_utils.is_dn(computer_location):
-                location_obj = self.find_object_by_distinguished_name(computer_location)
-            else:
-                location_obj = self.find_object_by_canonical_name(computer_location)
-            if location_obj is None:
-                raise DomainJoinException('The computer location {} cannot be found in the domain.'
-                                          .format(computer_location))
-            # make sure our location is a container
-            is_container_or_ou = (location_obj.is_of_object_class(ldap_constants.ORGANIZATIONAL_UNIT_OBJECT_CLASS)
-                                  or location_obj.is_of_object_class(ldap_constants.CONTAINER_OBJECT_CLASS))
-            if not is_container_or_ou:
-                raise DomainJoinException('The specified computer location {} exists, but is not a container or an '
-                                          'organizational unit, and so a computer cannot be created there.'
-                                          .format(location_obj.distinguished_name))
-            # make sure that going forward we have an LDAP-style relative distinguished name for our
-            # location
-            computer_location = ldap_utils.normalize_object_location_in_domain(location_obj.distinguished_name,
-                                                                               self.domain_dns_name)
+        computer_location = self.validate_location_for_creation_or_movement_and_get_dn(
+            computer_location,
+            ldap_constants.DEFAULT_COMPUTER_LOCATION
+        )
 
         # now we can build our full object distinguished name
         computer_dn = ldap_utils.construct_object_distinguished_name(computer_name, computer_location,
@@ -3545,6 +3485,44 @@ class ADSession:
         return self.ldap_connection.extend.standard.who_am_i()
 
     # internal validation utils
+
+    def validate_location_for_creation_or_movement_and_get_dn(self, object_location: Optional[str],
+                                                              default_location: str) -> str:
+        """ A function for validating that a location actually exists within the domain and is of a type (OU or
+        container) such that other objects can be placed there. This is used heavily internally, but does not
+        start with an underscore in case people find it useful externally too.
+
+        :param object_location: The location to be validated. If null, the default location is returned. The format
+                                may either be a distinguished name (relative or absolute) or a canonical name
+                                (relative or absolute).
+        :param default_location: A string relative dn that is the default location to return if object_location is null
+        :returns: A string relative distinguished name representing the location.
+        :raises: An InvalidLdapParameterException is the location does not exist or is not able to contain objects
+        """
+        if object_location is None:
+            object_location = default_location
+        else:
+            object_location = ldap_utils.normalize_object_location_in_domain(object_location, self.domain_dns_name)
+            # make sure our location exists
+            if ldap_utils.is_dn(object_location):
+                location_obj = self.find_object_by_distinguished_name(object_location)
+            else:
+                location_obj = self.find_object_by_canonical_name(object_location)
+            if location_obj is None:
+                raise ObjectCreationException('The user location {} cannot be found in the domain.'
+                                              .format(object_location))
+            # make sure our location is a container
+            is_container_or_ou = (location_obj.is_of_object_class(ldap_constants.ORGANIZATIONAL_UNIT_OBJECT_CLASS)
+                                  or location_obj.is_of_object_class(ldap_constants.CONTAINER_OBJECT_CLASS))
+            if not is_container_or_ou:
+                raise InvalidLdapParameterException('The specified location {} exists, but is not a container or an '
+                                                    'organizational unit, and so other objects cannot be created there.'
+                                                    .format(location_obj.distinguished_name))
+            # make sure that going forward we have an LDAP-style relative distinguished name for our
+            # location
+            object_location = ldap_utils.normalize_object_location_in_domain(location_obj.distinguished_name,
+                                                                             self.domain_dns_name)
+        return object_location
 
     def _validate_group_and_get_group_obj(self, group: Union[str, ADGroup], skip_validation=False) -> ADGroup:
         if isinstance(group, str):
