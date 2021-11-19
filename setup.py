@@ -2,7 +2,7 @@
 
 from setuptools import setup
 
-version = '1.10.3'
+version = '1.11.0'
 author = 'Azaria Zornberg'
 email = 'a.zornberg96@gmail.com'
 license_str = 'MIT License'

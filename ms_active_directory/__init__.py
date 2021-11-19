@@ -24,7 +24,9 @@
 # SOFTWARE.
 
 from ms_active_directory.core.managed_ad_objects import (
-    ManagedADComputer
+    ManagedADComputer,
+    ManagedADObject,
+    ManagedADUser,
 )
 
 from ms_active_directory.core.ad_domain import (
