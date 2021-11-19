@@ -47,7 +47,8 @@ from ms_active_directory.environment.kerberos.kerberos_constants import (
     AD_ENC_TYPE_TO_KRB5_ENC_TYPE_MAP,
     AES_CIPHER_BLOCK_SIZE_BYTES,
     AES_ITERATIONS_FOR_AD,
-    SALT_FORMAT_FOR_AD,
+    SALT_FORMAT_FOR_AD_COMPUTERS,
+    SALT_FORMAT_FOR_AD_USERS,
 )
 from ms_active_directory.environment.security.security_config_constants import (
     ADEncryptionType,
@@ -57,23 +58,26 @@ from ms_active_directory.environment.security.security_config_constants import (
 logger = logging_utils.get_logger()
 
 
-def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_computer_name: str, ad_password: str,
-                              ad_domain_dns_name: str, ad_auth_realm: str = None) -> RawKerberosKey:
-    """ Given an encryption type, a computer name, a password, and a domain, generate the raw kerberos key for an AD
+def ad_password_string_to_key(ad_encryption_type: ADEncryptionType, ad_logon_name: str, ad_password: str,
+                              ad_domain_dns_name: str, ad_auth_realm: str = None,
+                              is_user: bool = False) -> RawKerberosKey:
+    """ Given an encryption type, a logon name, a password, and a domain, generate the raw kerberos key for an AD
     account. Optionally, a realm may be specified if the kerberos realm for the domain is not the domain itself
     (this may be the case for subdomains or when AD is not the central authentication for an environment).
     :param ad_encryption_type: The kerberos encryption type to use for generating the key.
-    :param ad_computer_name: The name of the computer in AD. This is the sAMAccountName without the trailing $.
-    :param ad_password: The password of the computer.
-    :param ad_domain_dns_name: The DNS name of the AD domain where the computer exists.
+    :param ad_logon_name: The name of the computer or user in AD. This is the sAMAccountName without the trailing $.
+    :param ad_password: The password of the computer or user.
+    :param ad_domain_dns_name: The DNS name of the AD domain where the computer or user exists.
     :param ad_auth_realm: The realm used by the domain for authentication. If not specified, defaults to the domain
                           in all captial letters.
+    :param is_user: True if we're generating a key for a user, False for computers. Defaults to False for backwards
+                    compatibility.
     """
     ad_auth_realm = ad_auth_realm if ad_auth_realm else ad_domain_dns_name
     # be forgiving to those who don't read the docs
-    if ad_computer_name.endswith('$'):
-        ad_computer_name = ad_computer_name[:-1]
-    salt_str = _format_aes_salt_for_ad(ad_computer_name, ad_domain_dns_name, ad_auth_realm)
+    if ad_logon_name.endswith('$') and not is_user:
+        ad_logon_name = ad_logon_name[:-1]
+    salt_str = _format_aes_salt_for_ad(ad_logon_name, ad_domain_dns_name, ad_auth_realm, is_user)
     # we can just always pass in a salt and iterations, and unsalted encryption types (e.g. rc4-hmac) will ignore it
     return password_string_to_key(ad_encryption_type, ad_password, salt_str, AES_ITERATIONS_FOR_AD)
 
@@ -111,26 +115,32 @@ def _get_enc_type_profile(enc_type: ADEncryptionType):
     return ad_enc_to_profile[enc_type]
 
 
-def _format_aes_salt_for_ad(computer_name: str, domain: str, realm: str):
+def _format_aes_salt_for_ad(logon_name: str, domain: str, realm: str, is_user: bool):
     """ Computer names and domains can be specified in any casing. However, DNS names are case insensitive, as are
-    computer names in AD.
+    computer names in AD. User names are also case insensitive.
     However, salts for AES encryption are not case insensitive because AES doesn't cater to Active Directory's desires.
     The result is a confusing standard that we try to gracefully accommodate by converting casing as needed so that we,
     as a client, can generate keys the same way AD does internally.
     AD also uses different information in its salt than other kerberos realms, so we handle that here as well.
     Normal kerberos realms just do [case sensitive realm][case sensitive principal], which runs contrary to AD's notion
     of domain name/realm name and principals directly translating into DNS and therefore being case insensitive.
+
+    See docs at https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-kile/2a32282e-dd48-4ad9-a542-609804b02cc9
     """
     # in the AES salt for AD, the realm piece is always uppercase
     upper_realm = realm.upper()
     # in the AES salt for AD, the domain is always lowercase
     lower_domain = domain.lower()
-    # active directory names are case insensitive, so AD decided that salts should always use the lower case name for
-    # the computer, because the salting of AES is not case insensitive
-    lower_computer_name = computer_name.lower()
-    salt_string = SALT_FORMAT_FOR_AD.format(lowercase_computer_name=lower_computer_name,
-                                            uppercase_realm=upper_realm,
-                                            lowercase_domain=lower_domain)
+    if is_user:
+        # the doc doesn't say to lowercase usernames, but I'm skeptical
+        salt_string = SALT_FORMAT_FOR_AD_USERS.format(logon_name=logon_name, uppercase_realm=upper_realm)
+    else:
+        # active directory names are case insensitive, so AD decided that salts should always use the lower case name
+        # for the computer, because the salting of AES is not case insensitive
+        lowercase_computer_name = logon_name.lower()
+        salt_string = SALT_FORMAT_FOR_AD_COMPUTERS.format(lowercase_computer_name=lowercase_computer_name,
+                                                          uppercase_realm=upper_realm,
+                                                          lowercase_domain=lower_domain)
     return salt_string
 
 

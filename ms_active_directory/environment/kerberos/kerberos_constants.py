@@ -65,8 +65,9 @@ PRINCIPAL_COMPONENT_DIVIDER = '/'
 # here begin constants used to generate raw kerberos keys
 AES_CIPHER_BLOCK_SIZE_BYTES = 16
 AES_ITERATIONS_FOR_AD = 4096
-
-SALT_FORMAT_FOR_AD = '{uppercase_realm}host{lowercase_computer_name}.{lowercase_domain}'
+# see docs at https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-kile/2a32282e-dd48-4ad9-a542-609804b02cc9
+SALT_FORMAT_FOR_AD_COMPUTERS = '{uppercase_realm}host{lowercase_computer_name}.{lowercase_domain}'
+SALT_FORMAT_FOR_AD_USERS = '{uppercase_realm}{logon_name}'
 
 # AD uses a bitstring to encode supported encryption types, so the values for
 # encryption types in AD are not the same as the values for encryption types
