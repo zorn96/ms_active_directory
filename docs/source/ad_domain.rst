@@ -19,7 +19,8 @@ and such is done using an ``ADDomain`` object::
                  discover_kerberos_servers: bool = True,
                  dns_nameservers: List[str] = None,
                  source_ip: str = None,
-                 netbios_name: str = None)
+                 netbios_name: str = None,
+                 auto_configure_kerberos_client: bool = False)
             Initializes an interface for defining an AD domain and interacting with it.
 
             :param domain: The DNS name of the Active Directory domain that this object represents.
@@ -69,6 +70,8 @@ and such is done using an ``ADDomain`` object::
                                  This can be set by users, but isn't needed. It's primarily here to avoid
                                  extra lookups when creating ADDomain objects from ADTrustedDomain objects, as
                                  the netbios name is already known.
+            :param auto_configure_kerberos_client: If true, automatically configure the local system to enable kerberos
+                                                   communication with the domain.
 
 
 As can be seen, creating a domain is fairly flexible. The only actual *required* parameter is the domain's dns name.

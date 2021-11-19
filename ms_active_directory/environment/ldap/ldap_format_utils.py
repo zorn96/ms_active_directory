@@ -113,6 +113,18 @@ def construct_object_distinguished_name(object_name: str, object_location: str, 
     return ','.join([common_part, object_location, domain_part])
 
 
+def construct_ou_distinguished_name(ou_name: str, domain: str, object_location: str = '') -> str:
+    """
+    Constructs the distinguished name of an organizational unit given the ou name, join location, and domain.
+    """
+    ou_part = 'OU=' + ou_name
+    domain_part = construct_ldap_base_dn_from_domain(domain)
+    parts = [ou_part, domain_part]
+    if object_location:
+        parts.insert(1, object_location)
+    return ','.join(parts)
+
+
 def construct_domain_from_ldap_base_dn(domain: str) -> str:
     """
     Given a base DN, constructs the DNS name of the AD domain.
@@ -337,9 +349,11 @@ def strip_domain_from_object_location(location: str, domain_dns_name: str) -> st
     return location
 
 
-def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bool) -> str:
-    """ Computer common names are sAMAccountNames without the $ at the end. So check for allowable
-    characters and length limits.
+def validate_and_normalize_logon_name(name: str, supports_legacy_behavior: bool) -> str:
+    """ User logon names are sAMAccountNames, and computer logon names are sAMAccountNames without the $ at the end.
+    So check for allowable characters and length limits with the option to support legacy behavior.
+    Users and computers using older authentication protocols that support pre-windows 2000 behavior have different
+    restrictions on things like length.
     """
     limit = LEGACY_SAM_ACCOUNT_NAME_LENGTH_LIMIT if supports_legacy_behavior else SAM_ACCOUNT_NAME_LENGTH
     # peel off the ending $ if present
@@ -347,10 +361,10 @@ def validate_and_normalize_computer_name(name: str, supports_legacy_behavior: bo
         name = name[:-1]
     if len(name) > limit:
         insert = 'support' if supports_legacy_behavior else 'do not support'
-        raise InvalidDomainParameterException('Computer name length must be fewer than {} characters for computers '
+        raise InvalidDomainParameterException('Common name length must be fewer than {} characters for accounts '
                                               'that {} legacy behavior.'.format(limit, insert))
     for character in AD_USERNAME_RESTRICTED_CHARS:
         if character in name:
-            raise InvalidDomainParameterException('AD computer names may not contain any of the following characters: '
+            raise InvalidDomainParameterException('Common names may not contain any of the following characters: '
                                                   '{}'.format(', '.join(AD_USERNAME_RESTRICTED_CHARS)))
     return name

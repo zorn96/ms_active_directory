@@ -170,6 +170,28 @@ class ADObject:
     def __str__(self):
         return self.__repr__()
 
+    def __eq__(self, other):
+        if not isinstance(other, self.__class__):
+            return False
+
+        same_dn = other.distinguished_name == self.distinguished_name
+        # only compare dns name for domain because things like site and ldap servers can vary, but that doesn't
+        # affect the objects within the domain
+        # this isn't perfect. but if you want perfect comparisons of objects, you should get their SIDs and compare
+        # those, as well as comparing their 'whenChanged' to ensure there's been no alteration across them.
+        # this provides basic equality without requiring permission to read those attributes
+        same_domain = other.domain.get_domain_dns_name() == self.domain.get_domain_dns_name()
+        return same_dn and same_domain
+
+    def __hash__(self):
+        # use the domain dns name and the object classes in the hash, so that if we delete something at this dn and
+        # make something different there it will make a different hash
+        # this isn't perfect. but if you want perfect representations of objects' state, you should get their SIDs and
+        # use those, as well as using their 'whenChanged', to build your own hash so that the hash changes whenever the
+        # object changes
+        # this provides basic hash functionality without requiring permission to read those attributes
+        return hash((self.distinguished_name, self.domain.get_domain_dns_name(), self.object_classes))
+
 
 class ADComputer(ADObject):
 

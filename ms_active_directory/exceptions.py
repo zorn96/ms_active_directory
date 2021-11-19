@@ -159,6 +159,12 @@ class SessionTransferException(MsActiveDirectoryException):
         super().__init__(exception_str)
 
 
+class SystemConfigurationUpdateException(MsActiveDirectoryException):
+    """ An exception raised if we fail to update local system configurations as requested """
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class TrustedDomainConversionException(MsActiveDirectoryException):
     """ An exception raised when trying to convert a trusted domain that has a non-AD type
     to an ADDomain

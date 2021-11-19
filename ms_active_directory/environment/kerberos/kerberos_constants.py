@@ -65,8 +65,9 @@ PRINCIPAL_COMPONENT_DIVIDER = '/'
 # here begin constants used to generate raw kerberos keys
 AES_CIPHER_BLOCK_SIZE_BYTES = 16
 AES_ITERATIONS_FOR_AD = 4096
-
-SALT_FORMAT_FOR_AD = '{uppercase_realm}host{lowercase_computer_name}.{lowercase_domain}'
+# see docs at https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-kile/2a32282e-dd48-4ad9-a542-609804b02cc9
+SALT_FORMAT_FOR_AD_COMPUTERS = '{uppercase_realm}host{lowercase_computer_name}.{lowercase_domain}'
+SALT_FORMAT_FOR_AD_USERS = '{uppercase_realm}{logon_name}'
 
 # AD uses a bitstring to encode supported encryption types, so the values for
 # encryption types in AD are not the same as the values for encryption types
@@ -128,3 +129,28 @@ DEFAULT_UNKNOWN_NAME_TYPE = 0
 AD_DEFAULT_NAME_TYPE = 1
 
 DEFAULT_KRB5_KEYTAB_FILE_LOCATION = '/etc/krb5.keytab'
+# some posix-based operating systems have other kerberos configs (e.g. macOS uses a plist, some
+# linux versions use /etc/krb5/krb5.conf) but all of them support /etc/krb5.conf for compatibility
+POSIX_KRB5_CONF_LOCATION = '/etc/krb5.conf'
+# windows puts the krb5 config in an ini file, but its location has changed across versions.
+# for backwards compatibility, windows will always look in the old location even if the new
+# one exists, so we update all of them
+WINDOWS_KRB5_CONF_LOCATION_NEW = '/windows/krb5.ini'
+WINDOWS_KRB5_CONF_LOCATION_OLD = '/winnt/krb5.ini'
+
+# config file tags
+KRB5_CONF_DEFAULTS_TAG = '[libdefaults]'
+KRB5_CONF_REALMS_TAG = '[realms]'
+KRB5_CONF_DOMAIN_REALMS_TAG = '[domain_realm]'
+
+# config file format elements
+DEFAULT_REALM_FORMAT = '    default_realm = {realm}'
+# needs to use %s formatting due to brackets in the file
+REALM_ENTRY_FORMAT = """    %s = {
+        %s
+    }
+"""
+REALM_ENTRY_COMPONENT_FORMAT = """        {server_type} = {address}"""
+DOMAIN_REALM_MAP_FORMAT = """    {domain} = {realm}
+    .{domain} = {realm}
+"""
