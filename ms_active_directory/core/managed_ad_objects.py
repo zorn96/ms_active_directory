@@ -485,12 +485,12 @@ class ManagedADUser(ManagedADObject):
         """
         return write_gss_kerberos_key_list_to_raw_bytes(self.kerberos_keys)
 
-    def get_computer_distinguished_name(self) -> str:
+    def get_user_distinguished_name(self) -> str:
         """ Get the LDAP distinguished name for the user. This raises an exception if location is not
         set for the user.
         """
         if self.location is None:
-            raise InvalidComputerParameterException('The location of the computer is unknown and so a distinguished '
+            raise InvalidComputerParameterException('The location of the user is unknown and so a distinguished '
                                                     'name cannot be determined for it.')
         return construct_object_distinguished_name(self.common_name, self.location, self.domain_dns_name)
 
@@ -515,7 +515,7 @@ class ManagedADUser(ManagedADObject):
         :param encryption_types: The list of AD encryption types to set on the user.
         """
         if self.password is None:
-            raise InvalidComputerParameterException('Encryption types can only be set on a computer locally if its '
+            raise InvalidComputerParameterException('Encryption types can only be set on a user locally if its '
                                                     'password is known. Without the password, new kerberos keys cannot '
                                                     'be generated.')
 
@@ -544,7 +544,7 @@ class ManagedADUser(ManagedADObject):
         password is actually changed, then update_password_locally should be used as that will update
         the key version number properly and ensure the resultant kerberos keys can be properly used
         for initiating and accepting security contexts.
-        :param password: The string password to set for the computer.
+        :param password: The string password to set for the user.
         """
         self.password = password
         self.kerberos_keys = []
@@ -590,9 +590,9 @@ class ManagedADUser(ManagedADObject):
             fp.write(data)
 
     def update_password_locally(self, password: str):
-        """ Update the password for the computer locally and generate new kerberos keys for the new
+        """ Update the password for the user locally and generate new kerberos keys for the new
         password.
-        :param password: The string password to set for the computer.
+        :param password: The string password to set for the user.
         """
         self.kvno += 1
         logger.debug('Updated kvno for user %s from %s to %s', self.name, self.kvno - 1, self.kvno)
