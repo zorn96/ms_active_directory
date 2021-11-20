@@ -263,7 +263,8 @@ class ADSession:
                                       'and object classes {}. LDAP result: {}'.format(object_dn, object_classes,
                                                                                       result))
 
-    def create_user(self, username: str, first_name: str, last_name: str, object_location: str, user_password: str,
+    def create_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
+                    user_password: str = None,
                     encryption_types: List[Union[str, security_constants.ADEncryptionType]] = None,
                     common_name: str = None, supports_legacy_behavior: bool = False,
                     **additional_user_attributes) -> ManagedADUser:
@@ -279,7 +280,7 @@ class ADSession:
                                 created. It may be a relative distinguished name (not including the domain component)
                                 or a full distinguished name.  If not specified, defaults to CN=Users which is
                                 standard for Active Directory.
-        :param user_password: The user's password.
+        :param user_password: The user's password. If none is specified, a random password will be generated.
         :param encryption_types: A list of ADEncryptionType enums or strings representing kerberos encryption types
                                  that the user can authenticate with. If not specified, defaults to AES256-SHA1.
                                  These will also be used to generate user keys with their password.
@@ -304,6 +305,8 @@ class ADSession:
                      self.domain_dns_name, first_name, last_name, object_location, encryption_types,
                      supports_legacy_behavior, len(additional_user_attributes))
 
+        if user_password is None:
+            user_password = security_utils.generate_random_ad_password()
         encoded_pw = security_utils.encode_password(user_password)
 
         # normalize encryption type values and convert it to the encoded bitstring
@@ -325,7 +328,7 @@ class ADSession:
         return ManagedADUser(username, self.domain, location=object_location, password=user_password,
                              encryption_types=encryption_types, kvno=1, common_name=common_name)
 
-    def create_unmanaged_user(self, username: str, first_name: str, last_name: str, object_location: str,
+    def create_unmanaged_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
                               common_name: str = None, supports_legacy_behavior: bool = False,
                               **additional_user_attributes) -> ADUser:
         """ Use the session to create an unmanaged user in the domain and return a user object. This does not
@@ -391,6 +394,8 @@ class ADSession:
             ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME: user_principal_name,
             ldap_constants.AD_ATTRIBUTE_GIVEN_NAME: first_name,
             ldap_constants.AD_ATTRIBUTE_SURNAME: last_name,
+            # accounts may be disabled by default if we don't set this
+            ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL: ldap_constants.NORMAL_USER,
         }
         logger.info(
             'Attempting to create user in domain %s with the following LDAP attributes: %s and %s additional '

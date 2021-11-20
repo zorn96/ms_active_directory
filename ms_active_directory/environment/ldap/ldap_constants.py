@@ -45,6 +45,7 @@ OBJECT_CLASSES_FOR_GROUP = [TOP_OBJECT_CLASS, GROUP_OBJECT_CLASS]
 
 # computers have an account control that determines things like whether they're trusted
 # for
+NORMAL_USER = 512
 WORKSTATION_TRUST_ACCOUNT = 4096
 DONT_EXPIRE_PASSWORD = 65536
 ACCOUNT_DISABLED = 2

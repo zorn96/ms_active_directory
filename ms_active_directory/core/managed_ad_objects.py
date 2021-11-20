@@ -52,7 +52,7 @@ from ms_active_directory.environment.security.security_config_constants import (
     ADEncryptionType,
     ENCRYPTION_TYPE_STR_TO_ENUM,
 )
-from ms_active_directory.exceptions import InvalidComputerParameterException
+from ms_active_directory.exceptions import InvalidComputerParameterException, InvalidUserParameterException
 
 logger = logging_utils.get_logger()
 
@@ -465,9 +465,9 @@ class ManagedADUser(ManagedADObject):
                 encryption_type, self.name)
             return
         if self.password is None:
-            raise InvalidComputerParameterException('Encryption types can only be added to a user locally if its '
-                                                    'password is known. Without the password, new kerberos keys cannot '
-                                                    'be generated.')
+            raise InvalidUserParameterException('Encryption types can only be added to a user locally if its '
+                                                'password is known. Without the password, new kerberos keys cannot '
+                                                'be generated.')
         logger.debug('Adding encryption type %s to user %s locally',
                      encryption_type, self.name)
         self.encryption_types.append(encryption_type)
@@ -490,8 +490,8 @@ class ManagedADUser(ManagedADObject):
         set for the user.
         """
         if self.location is None:
-            raise InvalidComputerParameterException('The location of the user is unknown and so a distinguished '
-                                                    'name cannot be determined for it.')
+            raise InvalidUserParameterException('The location of the user is unknown and so a distinguished '
+                                                'name cannot be determined for it.')
         return construct_object_distinguished_name(self.common_name, self.location, self.domain_dns_name)
 
     def get_encryption_types(self) -> List[ADEncryptionType]:
@@ -515,9 +515,9 @@ class ManagedADUser(ManagedADObject):
         :param encryption_types: The list of AD encryption types to set on the user.
         """
         if self.password is None:
-            raise InvalidComputerParameterException('Encryption types can only be set on a user locally if its '
-                                                    'password is known. Without the password, new kerberos keys cannot '
-                                                    'be generated.')
+            raise InvalidUserParameterException('Encryption types can only be set on a user locally if its '
+                                                'password is known. Without the password, new kerberos keys cannot '
+                                                'be generated.')
 
         new_kerberos_keys = []
         new_raw_kerberos_keys = []

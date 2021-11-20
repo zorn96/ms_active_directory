@@ -91,6 +91,14 @@ class InvalidLdapParameterException(MsActiveDirectoryException):
         super().__init__(exception_str)
 
 
+class InvalidUserParameterException(MsActiveDirectoryException):
+    """ An exception raised when functions are called on a ManagedADUser object with invalid
+    parameters or that rely on unpopulated attributes.
+    """
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class KeytabEncodingException(MsActiveDirectoryException):
     """ An exception raised when a keytab is read in from a file but the encoding is invalid """
     def __init__(self, exception_str):
