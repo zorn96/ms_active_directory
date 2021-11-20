@@ -263,12 +263,13 @@ class ADSession:
                                       'and object classes {}. LDAP result: {}'.format(object_dn, object_classes,
                                                                                       result))
 
-    def create_user(self, username: str, first_name: str, last_name: str, object_location: str, user_password: str,
+    def create_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
+                    user_password: str = None,
                     encryption_types: List[Union[str, security_constants.ADEncryptionType]] = None,
                     common_name: str = None, supports_legacy_behavior: bool = False,
                     **additional_user_attributes) -> ManagedADUser:
-        """ Use the session to create an unmanaged user in the domain and return a user object. This does not
-        configure any auth mechanisms for the user like a password or kerberos keys.
+        """ Use the session to create a managed user in the domain and return an ManagedADUser object. This creates
+        a user with a password and generates kerberos keys for them.
         :param username: The login username for the user to create in the AD domain. This will be used to determine
                          the sAMAccountName for the user.
         :param first_name: The first name (given name) of the user to create in the AD domain. This will used for the
@@ -279,7 +280,7 @@ class ADSession:
                                 created. It may be a relative distinguished name (not including the domain component)
                                 or a full distinguished name.  If not specified, defaults to CN=Users which is
                                 standard for Active Directory.
-        :param user_password: The user's password.
+        :param user_password: The user's password. If none is specified, a random password will be generated.
         :param encryption_types: A list of ADEncryptionType enums or strings representing kerberos encryption types
                                  that the user can authenticate with. If not specified, defaults to AES256-SHA1.
                                  These will also be used to generate user keys with their password.
@@ -304,28 +305,8 @@ class ADSession:
                      self.domain_dns_name, first_name, last_name, object_location, encryption_types,
                      supports_legacy_behavior, len(additional_user_attributes))
 
-        # validate our username
-        username = ldap_utils.validate_and_normalize_logon_name(username, supports_legacy_behavior)
-        if self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, username):
-            raise ObjectCreationException('An object already exists with sAMAccountName {} so a user may not be '
-                                          'created with the username {}'.format(username, username))
-
-        # get or normalize our object location. the end format is as a relative distinguished name
-        object_location = self.validate_location_for_creation_or_movement_and_get_dn(
-            object_location,
-            ldap_constants.DEFAULT_USER_GROUP_LOCATION
-        )
-        # construct common name from first and last names if not specified
-        if not common_name:
-            common_name = first_name + ' ' + last_name
-        # now we can build our full object distinguished name
-        user_dn = ldap_utils.construct_object_distinguished_name(common_name, object_location, self.domain_dns_name)
-        if self.dn_exists_in_domain(user_dn):
-            raise ObjectCreationException('There exists an object in the domain with distinguished name {} and so a '
-                                          'user may not be created in the domain with name {} in location {}. '
-                                          'Please use a different name or location.'
-                                          .format(user_dn, common_name, object_location))
-
+        if user_password is None:
+            user_password = security_utils.generate_random_ad_password()
         encoded_pw = security_utils.encode_password(user_password)
 
         # normalize encryption type values and convert it to the encoded bitstring
@@ -335,33 +316,19 @@ class ADSession:
             encryption_types = security_utils.normalize_encryption_type_list(encryption_types)
         encoded_enc_type_value = security_utils.get_supported_encryption_types_value(encryption_types)
 
-        # construct userPrincipalName from username and domain
-        user_principal_name = username + '@' + self.domain_dns_name
-
         user_attributes = {
-            ldap_constants.AD_ATTRIBUTE_DISPLAY_NAME: common_name,
-            ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME: username,
-            ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME: user_principal_name,
             ldap_constants.AD_ATTRIBUTE_PASSWORD: encoded_pw,
             ldap_constants.AD_ATTRIBUTE_ENCRYPTION_TYPES: encoded_enc_type_value,
-            ldap_constants.AD_ATTRIBUTE_GIVEN_NAME: first_name,
-            ldap_constants.AD_ATTRIBUTE_SURNAME: last_name,
         }
-        loggable_attributes = copy.deepcopy(user_attributes)
-        del loggable_attributes[ldap_constants.AD_ATTRIBUTE_PASSWORD]
-        logger.info(
-            'Attempting to create user in domain %s with the following LDAP attributes: %s and %s additional '
-            'attributes', self.domain_dns_name, loggable_attributes, len(additional_user_attributes))
-
         # add in our additional account attributes at the end so they can override anything we set here
         user_attributes.update(additional_user_attributes)
 
-        self._create_object(user_dn, ldap_constants.OBJECT_CLASSES_FOR_USER, user_attributes,
-                            sanity_check_for_existence=False)  # we already checked for this
+        self.create_unmanaged_user(username, first_name, last_name, object_location, common_name,
+                                   supports_legacy_behavior, **user_attributes)
         return ManagedADUser(username, self.domain, location=object_location, password=user_password,
                              encryption_types=encryption_types, kvno=1, common_name=common_name)
 
-    def create_unmanaged_user(self, username: str, first_name: str, last_name: str, object_location: str,
+    def create_unmanaged_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
                               common_name: str = None, supports_legacy_behavior: bool = False,
                               **additional_user_attributes) -> ADUser:
         """ Use the session to create an unmanaged user in the domain and return a user object. This does not
@@ -427,6 +394,8 @@ class ADSession:
             ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME: user_principal_name,
             ldap_constants.AD_ATTRIBUTE_GIVEN_NAME: first_name,
             ldap_constants.AD_ATTRIBUTE_SURNAME: last_name,
+            # accounts may be disabled by default if we don't set this
+            ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL: ldap_constants.NORMAL_USER,
         }
         logger.info(
             'Attempting to create user in domain %s with the following LDAP attributes: %s and %s additional '
