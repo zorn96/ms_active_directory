@@ -1690,17 +1690,30 @@ class ADSession:
 
         filter_pieces = []
         mapping_dict = {}
-        for entity_dn, entity in entity_dns_to_entities:
+        primary_group_dict = {}
+        for entity_dn, entity in entity_dns_to_entities.items():
             filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_MEMBER,
                                             ldap_utils.escape_dn_for_filter(entity_dn))
             filter_pieces.append(filter_piece)
             mapping_dict[entity] = []
             if include_primary:
-                entity_obj = self.find_object_by_distinguished_name(entity_dn, controls=controls)
-                # only get primary group if entity is of type ADUser or ADComputer
-                if isinstance(entity_obj, ADUser) or isinstance(entity_obj, ADComputer):
-                    primary_group = self.find_primary_group_for_account(entity_obj, attributes_to_lookup, controls)
-                    mapping_dict[entity].append(primary_group)
+                # get objectSid and primaryGroupID for entity
+                attributes = [ldap_constants.AD_ATTRIBUTE_OBJECT_SID, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
+                entity_obj = self.find_object_by_distinguished_name(entity_dn, attributes, controls)
+
+                entity_sid = entity_obj.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
+                primary_group_id = entity_obj.get(ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID)
+
+                # only add the filter for primary group if the entity has objectSid and primaryGroupID attributes
+                if entity_sid and primary_group_id:
+                    # get the objectSid for the primary group given the entity's objectSid and the primaryGroupID
+                    group_sid = ldap_utils.construct_primary_group_sid(entity_sid, primary_group_id)
+                    primary_filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_OBJECT_SID, group_sid)
+                    filter_pieces.append(primary_filter_piece)
+
+                    # save objectSid to dictionary for entity_dn for quick lookup later
+                    primary_group_dict[entity_dn] = group_sid
+
         all_member_filters = ''.join(filter_pieces)
         # this filter can get really really big, because DNs are long and we can have a lot of entities.
         # AD does have a limit on request size; that limit is huge by default though - 10MB - and can be raised
@@ -1723,6 +1736,9 @@ class ADSession:
             attributes_to_lookup = []
         if ldap_constants.AD_ATTRIBUTE_MEMBER not in attributes_to_lookup:
             attributes_to_lookup.append(ldap_constants.AD_ATTRIBUTE_MEMBER)
+        # make sure objectSid is included in the results if including primary groups
+        if include_primary and ldap_constants.AD_ATTRIBUTE_OBJECT_SID not in attributes_to_lookup:
+            attributes_to_lookup.append(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
         # look up our results
         results = self._find_ad_objects_and_attrs(self.domain_search_base, chain_filter, SUBTREE,
                                                   attributes_to_lookup, 0, ADGroup, controls)
@@ -1737,11 +1753,17 @@ class ADSession:
             # cast all members to lowercase for a case-insensitive membership check. our normalization
             # function gave use lowercase DNs
             member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER))
+            group_sid = result.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID) if include_primary else None
             for entity_dn in entity_dns_to_entities:
-                if entity_dn in member_set:
+                if include_primary and primary_group_dict[entity_dn] == group_sid:
+                    # if result group is primary group for entity, insert it at the beginning of the list
+                    entity = entity_dns_to_entities[entity_dn]
+                    mapping_dict[entity].insert(0, result)
+                elif entity_dn in member_set:
                     # get our input entity for the result dict
                     entity = entity_dns_to_entities[entity_dn]
                     mapping_dict[entity].append(result)
+
         return mapping_dict
 
     def find_groups_for_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,

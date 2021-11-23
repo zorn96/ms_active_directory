@@ -370,9 +370,12 @@ def validate_and_normalize_logon_name(name: str, supports_legacy_behavior: bool)
     return name
 
 
+# TODO: change this to read base sid from cached domain object sid
 def construct_primary_group_sid(object_sid: str, primary_group_id: int) -> str:
     """ Construct the objectSid for the primary group of an object given the objectSid of the object in question
     and the primaryGroupID for the object.
+
+    Relevant microsoft doc: https://docs.microsoft.com/en-us/windows/win32/adschema/a-primarygroupid
     """
     base_sid = object_sid[:object_sid.rfind('-')]
     return '{base}-{rid}'.format(base=base_sid, rid=primary_group_id)
