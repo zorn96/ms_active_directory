@@ -1688,13 +1688,13 @@ class ADSession:
         entity_dns_to_entities = ldap_utils.normalize_entities_to_entity_dns(entities, lookup_by_name_fn, controls,
                                                                              skip_validation)
 
-        filter_pieces = []
+        filter_pieces = set()
         mapping_dict = {}
         primary_group_dict = {}
         for entity_dn, entity in entity_dns_to_entities.items():
             filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_MEMBER,
                                             ldap_utils.escape_dn_for_filter(entity_dn))
-            filter_pieces.append(filter_piece)
+            filter_pieces.add(filter_piece)
             mapping_dict[entity] = []
             if include_primary:
                 # get objectSid and primaryGroupID for entity
@@ -1709,7 +1709,7 @@ class ADSession:
                     # get the objectSid for the primary group given the entity's objectSid and the primaryGroupID
                     group_sid = ldap_utils.construct_primary_group_sid(entity_sid, primary_group_id)
                     primary_filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_OBJECT_SID, group_sid)
-                    filter_pieces.append(primary_filter_piece)
+                    filter_pieces.add(primary_filter_piece)
 
                     # save objectSid to dictionary for entity_dn for quick lookup later
                     primary_group_dict[entity_dn] = group_sid
