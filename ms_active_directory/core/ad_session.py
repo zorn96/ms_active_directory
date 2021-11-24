@@ -1956,6 +1956,56 @@ class ADSession:
         group_sid = ldap_utils.construct_primary_group_sid(account_sid, primary_group_id)
         return self.find_group_by_sid(group_sid, attributes_to_lookup, controls)
 
+    def set_primary_group_for_account(self, account: Union[str, ADUser, ADComputer],
+                                      primary_group: Union[str, ADGroup],  controls: List[Control] = None,
+                                      raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool:
+        """ Set the primary group for an account given the group, either as a string or an ADGroup object.
+
+        :param account: The account whose primary group will be set. This can either be an ADUser, ADComputer, or a
+                        string name of an AD account.
+        :param primary_group: The primary group that will be set for the account. This can either be an ADGroup object
+                              or a string name identifier fora a group.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if the account is not a string, ADUser, or ADComputer.
+        :raises: ObjectNotFoundException if the account cannot be found.
+        :raises: MembershipModificationException if we fail to add account to specified primary_group.
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        """
+        if isinstance(primary_group, ADGroup):
+            # if our group is an ADGroup, we can do the lookup by DN which is most efficient
+            informed_group_object = self.find_group_by_distinguished_name(primary_group.distinguished_name,
+                                                                          [ldap_constants.AD_ATTRIBUTE_OBJECT_SID],
+                                                                          controls=controls)
+        elif isinstance(primary_group, str):
+            informed_group_object = self.find_group_by_name(primary_group, [ldap_constants.AD_ATTRIBUTE_OBJECT_SID],
+                                                            controls=controls)
+        else:
+            raise InvalidLdapParameterException('primary_group must be either a string or an ADGroup object. {} is '
+                                                'neither. '.format(primary_group))
+        if informed_group_object is None:
+            raise ObjectNotFoundException('No group could be found in the domain with the Group object class using '
+                                          'group {}'.format(primary_group))
+        # get objectSid for the primary_group
+        group_sid = informed_group_object.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
+        group_rid = ldap_utils.get_rid_from_object_sid(group_sid)
+
+        account = self._validate_user_and_get_user_obj(account, can_be_computer=True, skip_validation=skip_validation)
+        # ensure the account is a member of the primary group before setting primaryGroupID attribute
+        # If the group add fails, it will throw a MembershipModificationException.
+        self.add_users_to_groups([account], [informed_group_object], controls=controls,
+                                 skip_validation=skip_validation)
+        return self.overwrite_attribute_for_object(account, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID, group_rid,
+                                                   controls, raise_exception_on_failure, skip_validation)
+
     def find_members_of_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
                               controls: List[Control] = None,
                               skip_validation: bool = False) -> List[Union[ADUser, ADGroup, ADComputer, ADObject]]:
@@ -2303,8 +2353,8 @@ class ADSession:
                                 performs far fewer queries.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
-        :raises: MembershipModificationException if we fail to add groups to any other groups and rollback succeeds.
-        :raises: MembershipModificationRollbackException if we fail to add any groups to other groups, and then also
+        :raises: MembershipModificationException if we fail to add users to any groups and rollback succeeds.
+        :raises: MembershipModificationRollbackException if we fail to add any users to groups, and then also
                  fail when removing the groups that had been added successfully, leaving us in a partially completed
                  state. This may occur if the session has permission to add members but not to remove members.
         """
@@ -2335,8 +2385,8 @@ class ADSession:
                                 performs far fewer queries.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
-        :raises: MembershipModificationException if we fail to add groups to any other groups and rollback succeeds.
-        :raises: MembershipModificationRollbackException if we fail to add any groups to other groups, and then also
+        :raises: MembershipModificationException if we fail to add computers to any groups and rollback succeeds.
+        :raises: MembershipModificationRollbackException if we fail to add any computers to groups, and then also
                  fail when removing the groups that had been added successfully, leaving us in a partially completed
                  state. This may occur if the session has permission to add members but not to remove members.
         """

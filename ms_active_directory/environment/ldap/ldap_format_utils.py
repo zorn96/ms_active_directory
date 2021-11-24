@@ -379,3 +379,10 @@ def construct_primary_group_sid(object_sid: str, primary_group_id: int) -> str:
     """
     base_sid = object_sid[:object_sid.rfind('-')]
     return '{base}-{rid}'.format(base=base_sid, rid=primary_group_id)
+
+
+def get_rid_from_object_sid(object_sid: str) -> int:
+    """ Given an objectSid, return the RID (Relative Identifier) of the object.
+    """
+    rid_string = object_sid[object_sid.rfind('-') + 1:]
+    return int(rid_string)
