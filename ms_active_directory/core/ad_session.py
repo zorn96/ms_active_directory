@@ -1946,8 +1946,8 @@ class ADSession:
             raise InvalidLdapParameterException('The account must be either a string, ADUser object, or ADComputer '
                                                 'object. {} is not of these types.'.format(account))
         if informed_account is None:
-            raise ObjectNotFoundException('No group could be found in the domain with the Group object class using '
-                                          'group {}'.format(account))
+            raise ObjectNotFoundException('No account could be found in the domain with the User or Computer object '
+                                          'class using account {}'.format(account))
 
         account_sid = informed_account.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
         primary_group_id = informed_account.get(ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID)
