@@ -368,3 +368,21 @@ def validate_and_normalize_logon_name(name: str, supports_legacy_behavior: bool)
             raise InvalidDomainParameterException('Common names may not contain any of the following characters: '
                                                   '{}'.format(', '.join(AD_USERNAME_RESTRICTED_CHARS)))
     return name
+
+
+# TODO: change this to read base sid from cached domain object sid
+def construct_primary_group_sid(object_sid: str, primary_group_id: int) -> str:
+    """ Construct the objectSid for the primary group of an object given the objectSid of the object in question
+    and the primaryGroupID for the object.
+
+    Relevant microsoft doc: https://docs.microsoft.com/en-us/windows/win32/adschema/a-primarygroupid
+    """
+    base_sid = object_sid[:object_sid.rfind('-')]
+    return '{base}-{rid}'.format(base=base_sid, rid=primary_group_id)
+
+
+def get_rid_from_object_sid(object_sid: str) -> int:
+    """ Given an objectSid, return the RID (Relative Identifier) of the object.
+    """
+    rid_string = object_sid[object_sid.rfind('-') + 1:]
+    return int(rid_string)

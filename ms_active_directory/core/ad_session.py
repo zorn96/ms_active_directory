@@ -1621,7 +1621,8 @@ class ADSession:
 
     def find_groups_for_entities(self, entities: List[Union[str, ADObject]], attributes_to_lookup: List[str] = None,
                                  lookup_by_name_fn: callable = None, controls: List[Control] = None,
-                                 skip_validation: bool = False) -> Dict[Union[str, ADObject], List[ADGroup]]:
+                                 skip_validation: bool = False,
+                                 include_primary: bool = False) -> Dict[Union[str, ADObject], List[ADGroup]]:
         """ Find the parent groups for all of the entities in a List.
         These entities may be users, groups, or anything really because Active Directory uses the "groupOfNames" style
         membership tracking, so all group members are just represented as distinguished names regardless of type.
@@ -1644,6 +1645,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param include_primary: If true, includes the entities' primary groups as the first entry in each entity's
+                                returned group list. This adds an additional performance cost so only enable this
+                                if needed.
         :returns: A dictionary mapping input entities to lists of ADGroup object representing their parent groups.
         :raises: a DuplicateNameException if an entity name is specified and more than one entry exists with the name.
         :raises: InvalidLdapParameterException if any non-string non-ADObject types are found in entities, or if any
@@ -1654,11 +1658,32 @@ class ADSession:
         entity_dns_to_entities = ldap_utils.normalize_entities_to_entity_dns(entities, lookup_by_name_fn, controls,
                                                                              skip_validation)
 
-        filter_pieces = []
-        for entity_dn in entity_dns_to_entities:
+        filter_pieces = set()
+        mapping_dict = {}
+        primary_group_dict = {}
+        for entity_dn, entity in entity_dns_to_entities.items():
             filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_MEMBER,
                                             ldap_utils.escape_dn_for_filter(entity_dn))
-            filter_pieces.append(filter_piece)
+            filter_pieces.add(filter_piece)
+            mapping_dict[entity] = []
+            if include_primary:
+                # get objectSid and primaryGroupID for entity
+                attributes = [ldap_constants.AD_ATTRIBUTE_OBJECT_SID, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
+                entity_obj = self.find_object_by_distinguished_name(entity_dn, attributes, controls)
+
+                entity_sid = entity_obj.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
+                primary_group_id = entity_obj.get(ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID)
+
+                # only add the filter for primary group if the entity has objectSid and primaryGroupID attributes
+                if entity_sid and primary_group_id:
+                    # get the objectSid for the primary group given the entity's objectSid and the primaryGroupID
+                    group_sid = ldap_utils.construct_primary_group_sid(entity_sid, primary_group_id)
+                    primary_filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_OBJECT_SID, group_sid)
+                    filter_pieces.add(primary_filter_piece)
+
+                    # save objectSid to dictionary for entity_dn for quick lookup later
+                    primary_group_dict[entity_dn] = group_sid
+
         all_member_filters = ''.join(filter_pieces)
         # this filter can get really really big, because DNs are long and we can have a lot of entities.
         # AD does have a limit on request size; that limit is huge by default though - 10MB - and can be raised
@@ -1681,13 +1706,13 @@ class ADSession:
             attributes_to_lookup = []
         if ldap_constants.AD_ATTRIBUTE_MEMBER not in attributes_to_lookup:
             attributes_to_lookup.append(ldap_constants.AD_ATTRIBUTE_MEMBER)
+        # make sure objectSid is included in the results if including primary groups
+        if include_primary and ldap_constants.AD_ATTRIBUTE_OBJECT_SID not in attributes_to_lookup:
+            attributes_to_lookup.append(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
         # look up our results
         results = self._find_ad_objects_and_attrs(self.domain_search_base, chain_filter, SUBTREE,
                                                   attributes_to_lookup, 0, ADGroup, controls)
         logger.info('Found %s unique parent groups across all %s entities', len(results), len(entities))
-        mapping_dict = {}
-        for entity in entities:
-            mapping_dict[entity] = []
 
         # go over our results and for each one, figure out which input entities have the group as a parent
         # (multiple entities could share parents)
@@ -1698,11 +1723,17 @@ class ADSession:
             # cast all members to lowercase for a case-insensitive membership check. our normalization
             # function gave use lowercase DNs
             member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER))
+            group_sid = result.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID) if include_primary else None
             for entity_dn in entity_dns_to_entities:
-                if entity_dn in member_set:
+                if include_primary and primary_group_dict[entity_dn] == group_sid:
+                    # if result group is primary group for entity, insert it at the beginning of the list
+                    entity = entity_dns_to_entities[entity_dn]
+                    mapping_dict[entity].insert(0, result)
+                elif entity_dn in member_set:
                     # get our input entity for the result dict
                     entity = entity_dns_to_entities[entity_dn]
                     mapping_dict[entity].append(result)
+
         return mapping_dict
 
     def find_groups_for_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
@@ -1753,7 +1784,8 @@ class ADSession:
                                              skip_validation=skip_validation)
 
     def find_groups_for_user(self, user: Union[str, ADUser], attributes_to_lookup: List[str] = None,
-                             controls: List[Control] = None, skip_validation: bool = False) -> List[ADGroup]:
+                             controls: List[Control] = None, skip_validation: bool = False,
+                             include_primary: bool = False) -> List[ADGroup]:
         """ Find the groups that a user belongs to, look up attributes of theirs, and return information about them.
 
         :param user: The user to lookup group memberships for. This can either be an ADUser or a string name of an
@@ -1767,17 +1799,19 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param include_primary: If true, includes the user's primary group as the first entry in the returned group
+                                list. This adds an additional performance cost so only enable this if needed.
         :returns: A list of ADGroup objects representing the groups that this user belongs to.
         :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if the user name is not a string or ADUser.
         """
         result_dict = self.find_groups_for_entities([user], attributes_to_lookup, self.find_user_by_name, controls,
-                                                    skip_validation=skip_validation)
+                                                    skip_validation=skip_validation, include_primary=include_primary)
         return result_dict[user]
 
     def find_groups_for_users(self, users: List[Union[str, ADUser]], attributes_to_lookup: List[str] = None,
-                              controls: List[Control] = None,
-                              skip_validation: bool = False) -> Dict[Union[str, ADUser], List[ADGroup]]:
+                              controls: List[Control] = None, skip_validation: bool = False,
+                              include_primary: bool = False) -> Dict[Union[str, ADUser], List[ADGroup]]:
         """ Find the groups that a list of users belong to, look up attributes of theirs, and return information about
         them.
 
@@ -1792,15 +1826,19 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param include_primary: If true, includes the users' primary groups as the first entry in each user's
+                                returned group list. This adds an additional performance cost so only enable this
+                                if needed.
         :returns: A dictionary mapping users to lists of ADGroup objects representing the groups that they belong to.
         :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if any users are not a string or ADUser.
         """
         return self.find_groups_for_entities(users, attributes_to_lookup, self.find_user_by_name, controls,
-                                             skip_validation=skip_validation)
+                                             skip_validation=skip_validation, include_primary=include_primary)
 
     def find_groups_for_computer(self, computer: Union[str, ADComputer], attributes_to_lookup: List[str] = None,
-                                 controls: List[Control] = None, skip_validation: bool = False) -> List[ADGroup]:
+                                 controls: List[Control] = None, skip_validation: bool = False,
+                                 include_primary: bool = False) -> List[ADGroup]:
         """ Find the groups that a computer belongs to, look up attributes of theirs, and return information about them.
 
         :param computer: The computer to lookup group memberships for. This can either be an ADComputer or a string
@@ -1814,17 +1852,20 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param include_primary: If true, includes the computer's primary group as the first entry in the returned group
+                                list. This adds an additional performance cost so only enable this if needed.
         :returns: A list of ADGroup objects representing the groups that this user belongs to.
         :raises: a DuplicateNameException if a computer name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if the computer name is not a string or ADComputer.
         """
         result_dict = self.find_groups_for_entities([computer], attributes_to_lookup, self.find_computer_by_name,
-                                                    controls, skip_validation=skip_validation)
+                                                    controls, skip_validation=skip_validation,
+                                                    include_primary=include_primary)
         return result_dict[computer]
 
     def find_groups_for_computers(self, computers: List[Union[str, ADComputer]], attributes_to_lookup: List[str] = None,
-                                  controls: List[Control] = None,
-                                  skip_validation: bool = False) -> Dict[Union[str, ADComputer], List[ADGroup]]:
+                                  controls: List[Control] = None, skip_validation: bool = False,
+                                  include_primary: bool = False) -> Dict[Union[str, ADComputer], List[ADGroup]]:
         """ Find the groups that a list of computers belong to, look up attributes of theirs, and return information
         about them.
 
@@ -1839,12 +1880,103 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param include_primary: If true, includes the computers' primary groups as the first entry in each computer's
+                                returned group list. This adds an additional performance cost so only enable this
+                                if needed.
         :returns: A dictionary mapping computers to lists of ADGroup objects representing the groups that they belong to
         :raises: a DuplicateNameException if a computer name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if any computers are not a string or ADComputer.
         """
         return self.find_groups_for_entities(computers, attributes_to_lookup, self.find_computer_by_name, controls,
-                                             skip_validation=skip_validation)
+                                             skip_validation=skip_validation, include_primary=include_primary)
+
+    def find_primary_group_for_account(self, account: Union[str, ADUser, ADComputer],
+                                       attributes_to_lookup: List[str] = None,
+                                       controls: List[Control] = None) -> Optional[ADGroup]:
+        """ Find the primary group that an account belongs to, look up its attributes, and return information about it.
+
+        :param account: The account to lookup primary group membership. This can either be an ADUser, ADComputer, or a
+                        string name of an AD account. If it is a string, the account will be looked up first to get
+                        unique distinguished name information about it unless it is a distinguished name.
+        :param attributes_to_lookup: A list of string LDAP attributes to look up in addition to our basic attributes.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: An ADGroup object representing the primary group for the account or none if it doesn't exist.
+        :raises: InvalidLdapParameterException if the account is not a string, ADUser, or ADComputer.
+        :raises: ObjectNotFoundException if the account cannot be found.
+        """
+        # get objectSid and primaryGroupID attributes for account
+        attributes = [ldap_constants.AD_ATTRIBUTE_OBJECT_SID, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
+        if isinstance(account, ADUser) or isinstance(account, ADComputer):
+            # if our account is an ADUser or ADComputer, we can do the lookup by DN which is most efficient
+            informed_account = self.find_user_by_distinguished_name(account.distinguished_name, attributes,
+                                                                    controls=controls)
+        elif isinstance(account, str):
+            informed_account = self.find_user_by_name(account, attributes, controls=controls)
+        else:
+            raise InvalidLdapParameterException('The account must be either a string, ADUser object, or ADComputer '
+                                                'object. {} is not of these types.'.format(account))
+        if informed_account is None:
+            raise ObjectNotFoundException('No account could be found in the domain with the User or Computer object '
+                                          'class using account {}'.format(account))
+
+        account_sid = informed_account.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
+        primary_group_id = informed_account.get(ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID)
+
+        # get the objectSid for the primary group given the account's objectSid and the primaryGroupID
+        group_sid = ldap_utils.construct_primary_group_sid(account_sid, primary_group_id)
+        return self.find_group_by_sid(group_sid, attributes_to_lookup, controls)
+
+    def set_primary_group_for_account(self, account: Union[str, ADUser, ADComputer],
+                                      primary_group: Union[str, ADGroup],  controls: List[Control] = None,
+                                      raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool:
+        """ Set the primary group for an account given the group, either as a string or an ADGroup object.
+
+        :param account: The account whose primary group will be set. This can either be an ADUser, ADComputer, or a
+                        string name of an AD account.
+        :param primary_group: The primary group that will be set for the account. This can either be an ADGroup object
+                              or a string name identifier fora a group.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if the account is not a string, ADUser, or ADComputer.
+        :raises: ObjectNotFoundException if the account cannot be found.
+        :raises: MembershipModificationException if we fail to add account to specified primary_group.
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        """
+        if isinstance(primary_group, ADGroup):
+            # if our group is an ADGroup, we can do the lookup by DN which is most efficient
+            informed_group_object = self.find_group_by_distinguished_name(primary_group.distinguished_name,
+                                                                          [ldap_constants.AD_ATTRIBUTE_OBJECT_SID],
+                                                                          controls=controls)
+        elif isinstance(primary_group, str):
+            informed_group_object = self.find_group_by_name(primary_group, [ldap_constants.AD_ATTRIBUTE_OBJECT_SID],
+                                                            controls=controls)
+        else:
+            raise InvalidLdapParameterException('primary_group must be either a string or an ADGroup object. {} is '
+                                                'neither. '.format(primary_group))
+        if informed_group_object is None:
+            raise ObjectNotFoundException('No group could be found in the domain with the Group object class using '
+                                          'group {}'.format(primary_group))
+        # get objectSid for the primary_group
+        group_sid = informed_group_object.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
+        group_rid = ldap_utils.get_rid_from_object_sid(group_sid)
+
+        account = self._validate_user_and_get_user_obj(account, can_be_computer=True, skip_validation=skip_validation)
+        # ensure the account is a member of the primary group before setting primaryGroupID attribute
+        # If the group add fails, it will throw a MembershipModificationException.
+        self.add_users_to_groups([account], [informed_group_object], controls=controls,
+                                 skip_validation=skip_validation)
+        return self.overwrite_attribute_for_object(account, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID, group_rid,
+                                                   controls, raise_exception_on_failure, skip_validation)
 
     def find_members_of_group(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
                               controls: List[Control] = None,
@@ -2193,8 +2325,8 @@ class ADSession:
                                 performs far fewer queries.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
-        :raises: MembershipModificationException if we fail to add groups to any other groups and rollback succeeds.
-        :raises: MembershipModificationRollbackException if we fail to add any groups to other groups, and then also
+        :raises: MembershipModificationException if we fail to add users to any groups and rollback succeeds.
+        :raises: MembershipModificationRollbackException if we fail to add any users to groups, and then also
                  fail when removing the groups that had been added successfully, leaving us in a partially completed
                  state. This may occur if the session has permission to add members but not to remove members.
         """
@@ -2225,8 +2357,8 @@ class ADSession:
                                 performs far fewer queries.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
-        :raises: MembershipModificationException if we fail to add groups to any other groups and rollback succeeds.
-        :raises: MembershipModificationRollbackException if we fail to add any groups to other groups, and then also
+        :raises: MembershipModificationException if we fail to add computers to any groups and rollback succeeds.
+        :raises: MembershipModificationRollbackException if we fail to add any computers to groups, and then also
                  fail when removing the groups that had been added successfully, leaving us in a partially completed
                  state. This may occur if the session has permission to add members but not to remove members.
         """
