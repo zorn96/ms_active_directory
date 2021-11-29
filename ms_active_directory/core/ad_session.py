@@ -1676,8 +1676,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param include_primary: If true, includes the entities' primary groups in the returned groups. This adds a
-                                significant performance cost so only enable this if needed.
+        :param include_primary: If true, includes the entities' primary groups as the first entry in each entity's
+                                returned group list. This adds an additional performance cost so only enable this
+                                if needed.
         :returns: A dictionary mapping input entities to lists of ADGroup object representing their parent groups.
         :raises: a DuplicateNameException if an entity name is specified and more than one entry exists with the name.
         :raises: InvalidLdapParameterException if any non-string non-ADObject types are found in entities, or if any
@@ -1829,8 +1830,8 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param include_primary: If true, includes the user's primary group in the returned groups. This adds a
-                                significant performance cost so only enable this if needed.
+        :param include_primary: If true, includes the user's primary group as the first entry in the returned group
+                                list. This adds an additional performance cost so only enable this if needed.
         :returns: A list of ADGroup objects representing the groups that this user belongs to.
         :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if the user name is not a string or ADUser.
@@ -1856,8 +1857,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param include_primary: If true, includes the users' primary groups in the returned groups. This adds a
-                                significant performance cost so only enable this if needed.
+        :param include_primary: If true, includes the users' primary groups as the first entry in each user's
+                                returned group list. This adds an additional performance cost so only enable this
+                                if needed.
         :returns: A dictionary mapping users to lists of ADGroup objects representing the groups that they belong to.
         :raises: a DuplicateNameException if a user name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if any users are not a string or ADUser.
@@ -1881,8 +1883,8 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param include_primary: If true, includes the computer's primary group in the returned groups. This adds a
-                                significant performance cost so only enable this if needed.
+        :param include_primary: If true, includes the computer's primary group as the first entry in the returned group
+                                list. This adds an additional performance cost so only enable this if needed.
         :returns: A list of ADGroup objects representing the groups that this user belongs to.
         :raises: a DuplicateNameException if a computer name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if the computer name is not a string or ADComputer.
@@ -1909,8 +1911,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param include_primary: If true, includes the computers' primary groups in the returned groups. This adds a
-                                significant performance cost so only enable this if needed.
+        :param include_primary: If true, includes the computers' primary groups as the first entry in each computer's
+                                returned group list. This adds an additional performance cost so only enable this
+                                if needed.
         :returns: A dictionary mapping computers to lists of ADGroup objects representing the groups that they belong to
         :raises: a DuplicateNameException if a computer name is specified and more than one entry exists with the name.
         :raises: a InvalidLdapParameterException if any computers are not a string or ADComputer.
