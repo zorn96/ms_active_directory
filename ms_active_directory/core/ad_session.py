@@ -266,7 +266,7 @@ class ADSession:
     def create_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
                     user_password: str = None,
                     encryption_types: List[Union[str, security_constants.ADEncryptionType]] = None,
-                    common_name: str = None, supports_legacy_behavior: bool = False,
+                    common_name: str = None, supports_legacy_behavior: bool = False, skip_validation: bool = False,
                     **additional_user_attributes) -> ManagedADUser:
         """ Use the session to create a managed user in the domain and return an ManagedADUser object. This creates
         a user with a password and generates kerberos keys for them.
@@ -290,6 +290,8 @@ class ADSession:
         :param supports_legacy_behavior: Does the user being created support legacy behavior such as NTLM
                                          authentication or UNC path addressing from older windows clients?
                                          Defaults to False. Impacts the restrictions on user naming.
+        :param skip_validation: If true, skips the validation of the object location. Things like allowable
+                                characters in the username are always validated. Defaults to false.
         :param additional_user_attributes: Additional LDAP attributes to set on the user and their values.
                                            This is used to support power users setting arbitrary attributes.
                                            This also allows overriding of some values that are not explicit keyword
@@ -324,13 +326,14 @@ class ADSession:
         user_attributes.update(additional_user_attributes)
 
         self.create_unmanaged_user(username, first_name, last_name, object_location, common_name,
-                                   supports_legacy_behavior, **user_attributes)
+                                   supports_legacy_behavior, skip_validation=skip_validation,
+                                   **user_attributes)
         return ManagedADUser(username, self.domain, location=object_location, password=user_password,
                              encryption_types=encryption_types, kvno=1, common_name=common_name)
 
     def create_unmanaged_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
                               common_name: str = None, supports_legacy_behavior: bool = False,
-                              **additional_user_attributes) -> ADUser:
+                              skip_validation: bool = False, **additional_user_attributes) -> ADUser:
         """ Use the session to create an unmanaged user in the domain and return a user object. This does not
         configure any auth mechanisms for the user like a password or kerberos keys.
         :param username: The login username for the user to create in the AD domain. This will be used to determine
@@ -349,6 +352,8 @@ class ADSession:
         :param supports_legacy_behavior: Does the user being created support legacy behavior such as NTLM
                                          authentication or UNC path addressing from older windows clients?
                                          Defaults to False. Impacts the restrictions on user naming.
+        :param skip_validation: If true, skips the validation of the object location. Things like allowable
+                                characters in the username are always validated. Defaults to false.
         :param additional_user_attributes: Additional LDAP attributes to set on the user and their values.
                                            This is used to support power users setting arbitrary attributes.
                                            This also allows overriding of some values that are not explicit keyword
@@ -370,10 +375,15 @@ class ADSession:
                                           'created with the username {}'.format(username, username))
 
         # get or normalize our object location. the end format is as a relative distinguished name
-        object_location = self.validate_location_for_creation_or_movement_and_get_dn(
-            object_location,
-            ldap_constants.DEFAULT_USER_GROUP_LOCATION
-        )
+        if not skip_validation:
+            object_location = self.validate_location_for_creation_or_movement_and_get_dn(
+                object_location,
+                ldap_constants.DEFAULT_USER_GROUP_LOCATION
+            )
+        elif object_location is None:
+            # even if we're skipping validation, we should still do a null check for the default location
+            object_location = ldap_constants.DEFAULT_USER_GROUP_LOCATION
+
         # construct common name from first and last names if not specified
         if not common_name:
             common_name = first_name + ' ' + last_name
@@ -408,7 +418,8 @@ class ADSession:
                             sanity_check_for_existence=False)  # we already checked for this
         return ADUser(user_dn, user_attributes, self.domain)
 
-    def create_group(self, group_name: str, object_location: str, **additional_group_attributes) -> ADGroup:
+    def create_group(self, group_name: str, object_location: str = None, skip_validation: bool = False,
+                     **additional_group_attributes) -> ADGroup:
         """ Use the session to create a group in the domain and return a group object.
         :param group_name: The common name of the group to create in the AD domain. This will be used to determine
                            the sAMAccountName for the group.
@@ -416,6 +427,8 @@ class ADSession:
                                 created. It may be a relative distinguished name (not including the domain component)
                                 or a full distinguished name.  If not specified, defaults to CN=Users which is
                                 standard for Active Directory.
+        :param skip_validation: If true, skips the validation of the object location. Things like whether an object
+                                already exists with the desired DN are always validated. Defaults to false.
         :param additional_group_attributes: Additional LDAP attributes to set on the group and their values.
                                             This is used to support power users setting arbitrary attributes.
                                             This also allows overriding of some values that are not explicit keyword
@@ -434,10 +447,14 @@ class ADSession:
                                           'created with the name {}'.format(group_name, group_name))
 
         # get or normalize our group location. the end format is as a relative distinguished name
-        object_location = self.validate_location_for_creation_or_movement_and_get_dn(
-            object_location,
-            ldap_constants.DEFAULT_USER_GROUP_LOCATION
-        )
+        if not skip_validation:
+            object_location = self.validate_location_for_creation_or_movement_and_get_dn(
+                object_location,
+                ldap_constants.DEFAULT_USER_GROUP_LOCATION
+            )
+        elif object_location is None:
+            # even if we're skipping validation, we should still do a null check for the default location
+            object_location = ldap_constants.DEFAULT_USER_GROUP_LOCATION
 
         # now we can build our full object distinguished name
         group_dn = ldap_utils.construct_object_distinguished_name(group_name, object_location,
@@ -466,7 +483,7 @@ class ADSession:
     def create_computer(self, computer_name: str, computer_location: str = None, computer_password: str = None,
                         encryption_types: List[Union[str, security_constants.ADEncryptionType]] = None,
                         hostnames: List[str] = None, services: List[str] = None, supports_legacy_behavior: bool = False,
-                        **additional_account_attributes) -> ManagedADComputer:
+                        skip_validation: bool = False, **additional_account_attributes) -> ManagedADComputer:
         """ Use the session to create a computer in the domain and return a computer object.
         :param computer_name: The common name of the computer to create in the AD domain. This
                               will be used to determine the sAMAccountName, and if no hostnames
@@ -496,6 +513,8 @@ class ADSession:
                                          as NTLM authentication or UNC path addressing from older windows
                                          clients? Defaults to False. Impacts the restrictions on
                                          computer naming.
+        :param skip_validation: If true, skips the validation of the object location. Things like allowable
+                                characters in the computer name are always validated. Defaults to false.
         :param additional_account_attributes: Additional LDAP attributes to set on the account and their
                                               values. This is used to support power users setting arbitrary
                                               attributes, such as "userCertificate" to set the certificate
@@ -523,10 +542,14 @@ class ADSession:
                                       'created with the name {}'.format(samaccount_name, computer_name))
 
         # get or normalize our computer location. the end format is as a relative distinguished name
-        computer_location = self.validate_location_for_creation_or_movement_and_get_dn(
-            computer_location,
-            ldap_constants.DEFAULT_COMPUTER_LOCATION
-        )
+        if not skip_validation:
+            computer_location = self.validate_location_for_creation_or_movement_and_get_dn(
+                computer_location,
+                ldap_constants.DEFAULT_COMPUTER_LOCATION
+            )
+        elif computer_location is None:
+            # even if we're skipping validation, we should still do a null check for the default location
+            computer_location = ldap_constants.DEFAULT_COMPUTER_LOCATION
 
         # now we can build our full object distinguished name
         computer_dn = ldap_utils.construct_object_distinguished_name(computer_name, computer_location,
