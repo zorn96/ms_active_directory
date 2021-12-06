@@ -916,6 +916,16 @@ class ADSession:
                                                     search_base=policy_loc)
         return policies
 
+    def find_sid_for_domain(self) -> str:
+        """ Returns the SID identifier for the domain as a string. This will be unique even if multiple different
+        domains exist with the same DNS name (e.g. a domain was cloned from one data center to another) and
+        is a part of the SIDs of domain members.
+        This will be cached after one lookup because the domain SID doesn't change.
+
+        :returns: A string representing the domain SID.
+        """
+        return self.domain.find_sid(self.ldap_connection)
+
     def find_supported_sasl_mechanisms_for_domain(self) -> List[str]:
         """ Attempt to discover the SASL mechanisms supported by the domain and return them.
         This just builds upon the functionality that the domain has for this, as you don't need
@@ -1691,7 +1701,7 @@ class ADSession:
             mapping_dict[entity] = []
             if include_primary:
                 # get objectSid and primaryGroupID for entity
-                attributes = [ldap_constants.AD_ATTRIBUTE_OBJECT_SID, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
+                attributes = [ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
                 entity_obj = self.find_object_by_distinguished_name(entity_dn, attributes, controls)
 
                 entity_sid = entity_obj.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
@@ -1700,7 +1710,8 @@ class ADSession:
                 # only add the filter for primary group if the entity has objectSid and primaryGroupID attributes
                 if entity_sid and primary_group_id:
                     # get the objectSid for the primary group given the entity's objectSid and the primaryGroupID
-                    group_sid = ldap_utils.construct_primary_group_sid(entity_sid, primary_group_id)
+                    domain_sid = self.find_sid_for_domain()
+                    group_sid = ldap_utils.construct_primary_group_sid(domain_sid, primary_group_id)
                     primary_filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_OBJECT_SID, group_sid)
                     filter_pieces.add(primary_filter_piece)
 
@@ -1930,7 +1941,7 @@ class ADSession:
         :raises: ObjectNotFoundException if the account cannot be found.
         """
         # get objectSid and primaryGroupID attributes for account
-        attributes = [ldap_constants.AD_ATTRIBUTE_OBJECT_SID, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
+        attributes = [ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
         if isinstance(account, ADUser) or isinstance(account, ADComputer):
             # if our account is an ADUser or ADComputer, we can do the lookup by DN which is most efficient
             informed_account = self.find_user_by_distinguished_name(account.distinguished_name, attributes,
@@ -1944,11 +1955,11 @@ class ADSession:
             raise ObjectNotFoundException('No account could be found in the domain with the User or Computer object '
                                           'class using account {}'.format(account))
 
-        account_sid = informed_account.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
+        domain_sid = self.find_sid_for_domain()
         primary_group_id = informed_account.get(ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID)
 
         # get the objectSid for the primary group given the account's objectSid and the primaryGroupID
-        group_sid = ldap_utils.construct_primary_group_sid(account_sid, primary_group_id)
+        group_sid = ldap_utils.construct_primary_group_sid(domain_sid, primary_group_id)
         return self.find_group_by_sid(group_sid, attributes_to_lookup, controls)
 
     def set_primary_group_for_account(self, account: Union[str, ADUser, ADComputer],
