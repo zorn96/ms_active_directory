@@ -1799,12 +1799,10 @@ class ADSession:
                 # get objectSid and primaryGroupID for entity
                 attributes = [ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
                 entity_obj = self.find_object_by_distinguished_name(entity_dn, attributes, controls)
-
-                entity_sid = entity_obj.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
                 primary_group_id = entity_obj.get(ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID)
 
-                # only add the filter for primary group if the entity has objectSid and primaryGroupID attributes
-                if entity_sid and primary_group_id:
+                # only add the filter for primary group if the entity has primaryGroupID attribute
+                if primary_group_id:
                     # get the objectSid for the primary group given the entity's objectSid and the primaryGroupID
                     domain_sid = self.find_sid_for_domain()
                     group_sid = ldap_utils.construct_primary_group_sid(domain_sid, primary_group_id)
