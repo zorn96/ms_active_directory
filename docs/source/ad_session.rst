@@ -282,6 +282,18 @@ You can also look up attributes about the things you look up by specifying a lis
         :returns: an ADGroup object or None if the group does not exist.
         :raises: a DuplicateNameException if more than one entry exists with this name.
 
+    def find_computer_by_principal_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
+                                        controls: List[Control] = None) -> Optional[ADComputer]:
+        Find a Computer in AD based on a specified userPrincipalName and return it along with any
+        requested attributes.
+        :param computer_name: The userPrincipalName name of the computer.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computer. Regardless of
+                                     what's specified, the computer's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADComputer object or None if the computer does not exist.
+
     find_group_by_sam_name(self, group_name: str, attributes_to_lookup: List[str] = None, controls: List[ldap3.protocol.rfc4511.Control] = None) -> Union[ms_active_directory.core.ad_objects.ADGroup, NoneType]
         Find a Group in AD based on a specified sAMAccountName name and return it along with any
         requested attributes.
@@ -424,6 +436,18 @@ You can also look up attributes about the things you look up by specifying a lis
                          may succeed or fail based on their availability.
         :returns: an ADUser object or None if the user does not exist.
         :raises: a DuplicateNameException if more than one entry exists with this name.
+
+    def find_user_by_principal_name(self, user_name: str, attributes_to_lookup: List[str] = None,
+                                    controls: List[Control] = None) -> Optional[ADUser]:
+        Find a User in AD based on a specified userPrincipalName and return it along with any
+        requested attributes.
+        :param user_name: The userPrincipalName name of the user.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the user. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADUser object or None if the user does not exist.
 
     find_user_by_sam_name(self, user_name: str, attributes_to_lookup: List[str] = None, controls: List[ldap3.protocol.rfc4511.Control] = None) -> Union[ms_active_directory.core.ad_objects.ADUser, NoneType]
         Find a User in AD based on a specified sAMAccountName name and return it along with any

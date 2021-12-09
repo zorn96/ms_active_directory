@@ -1427,6 +1427,29 @@ class ADSession:
             return None
         return res[0]
 
+    def find_computer_by_principal_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
+                                        controls: List[Control] = None) -> Optional[ADComputer]:
+        """ Find a Computer in AD based on a specified userPrincipalName and return it along with any
+        requested attributes.
+        :param computer_name: The userPrincipalName name of the computer.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computer. Regardless of
+                                     what's specified, the computer's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADComputer object or None if the computer does not exist.
+        """
+        # build a compound filter for users with this principal name
+        search_filter = '(&({upn_attr}={upn}){type_filter})'.format(
+            upn_attr=ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME,
+            upn=computer_name,
+            type_filter=ldap_constants.FIND_USER_FILTER)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 1, ADComputer, controls)
+        if not res:
+            return None
+        return res[0]
+
     def find_computer_by_sam_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
                                   controls: List[Control] = None) -> Optional[ADComputer]:
         """ Find a Computer in AD based on a specified sAMAccountName name and return it along with any
@@ -1571,6 +1594,29 @@ class ADSession:
             return None
         return res[0]
 
+    def find_user_by_principal_name(self, user_name: str, attributes_to_lookup: List[str] = None,
+                                    controls: List[Control] = None) -> Optional[ADUser]:
+        """ Find a User in AD based on a specified userPrincipalName and return it along with any
+        requested attributes.
+        :param user_name: The userPrincipalName name of the user.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the user. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADUser object or None if the user does not exist.
+        """
+        # build a compound filter for users with this principal name
+        search_filter = '(&({upn_attr}={upn}){type_filter})'.format(
+            upn_attr=ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME,
+            upn=user_name,
+            type_filter=ldap_constants.FIND_USER_FILTER)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 1, ADUser, controls)
+        if not res:
+            return None
+        return res[0]
+
     def find_user_by_sam_name(self, user_name: str, attributes_to_lookup: List[str] = None,
                               controls: List[Control] = None) -> Optional[ADUser]:
         """ Find a User in AD based on a specified sAMAccountName name and return it along with any
@@ -1640,21 +1686,36 @@ class ADSession:
         is_dn = ldap_utils.is_dn(name)
         dn_lookup_func = self.find_group_by_distinguished_name
         sam_lookup_func = self.find_group_by_sam_name
+        upn_lookup_func = None
         cn_lookup_func = self.find_groups_by_common_name
         if lookup_type is ADUser:
             dn_lookup_func = self.find_user_by_distinguished_name
             sam_lookup_func = self.find_user_by_sam_name
+            # if the name doesn't have an @ then it can't be a UPN, so skip that lookup
+            if '@' in name:
+                upn_lookup_func = self.find_user_by_principal_name
             cn_lookup_func = self.find_users_by_common_name
         elif lookup_type is ADComputer:
             dn_lookup_func = self.find_computer_by_distinguished_name
             sam_lookup_func = self.find_computer_by_sam_name
+            # if the name doesn't have an @ then it can't be a UPN, so skip that lookup
+            if '@' in name:
+                upn_lookup_func = self.find_computer_by_principal_name
             cn_lookup_func = self.find_computers_by_common_name
 
+        # distinguished name is the most specific, so it goes first
         if is_dn:
             return dn_lookup_func(name, attributes_to_lookup, controls=controls)
-        res = sam_lookup_func(name, attributes_to_lookup)
+        # look by UPN first if we have it, since it's the most specific after distinguished name
+        if upn_lookup_func:
+            res = upn_lookup_func(name, attributes_to_lookup, controls=controls)
+            if res:
+                return res
+        # sAMAccountName is more specific than common name, so look for that next
+        res = sam_lookup_func(name, attributes_to_lookup, controls=controls)
         if res:
             return res
+        # the least common and most likely to have duplicates
         result_list = cn_lookup_func(name, attributes_to_lookup, controls=controls)
         if not result_list:
             return None
