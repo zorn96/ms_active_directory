@@ -141,6 +141,9 @@ class ADObject:
     def get(self, attribute_name: str, unpack_one_item_lists=False):
         """ Get an attribute about the object that isn't explicitly tracked as a member """
         val = self.all_attributes.get(attribute_name)
+        # if val is not defined, return None instead of an empty list:
+        if not val:
+            return None
         # there's a lot of 1-item lists from the ldap3 library
         if isinstance(val, list) and len(val) == 1 and unpack_one_item_lists:
             return copy.deepcopy(val[0])

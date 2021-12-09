@@ -1756,7 +1756,7 @@ class ADSession:
             # complexity of checking all input entities for all results to O(n^2) instead of O(n^3).
             # cast all members to lowercase for a case-insensitive membership check. our normalization
             # function gave use lowercase DNs
-            member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER))
+            member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER) or [])
             group_sid = result.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID) if include_primary else None
             for entity_dn in entity_dns_to_entities:
                 if include_primary and primary_group_dict[entity_dn] == group_sid:
