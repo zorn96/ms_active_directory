@@ -126,6 +126,14 @@ There are functions for finding domain resources, such as DNS servers, CA certif
 
         :returns: A list of ADGroupPolicy objects representing the policies in the domain.
 
+    def find_sid_for_domain(self) -> str:
+        Returns the SID identifier for the domain as a string. This will be unique even if multiple different
+        domains exist with the same DNS name (e.g. a domain was cloned from one data center to another) and
+        is a part of the SIDs of domain members.
+        This will be cached after one lookup because the domain SID doesn't change.
+
+        :returns: A string representing the domain SID.
+
     find_supported_sasl_mechanisms_for_domain(self) -> List[str]
         Attempt to discover the SASL mechanisms supported by the domain and return them.
         This just builds upon the functionality that the domain has for this, as you don't need
@@ -134,6 +142,16 @@ There are functions for finding domain resources, such as DNS servers, CA certif
         This is included in the session object for completeness.
         :returns: A list of strings indicating the supported SASL mechanisms for the domain.
                   ex: ['GSSAPI', 'GSS-SPNEGO', 'EXTERNAL']
+
+    def find_upn_suffixes_for_domain(self) -> List[str]:
+        Get the user principal name suffixes for the domain. These are alternate domains that users might have
+        in their user principal name, and use for logging on.
+        For example, a domain that has a read-only domain controller exposed to the internet might support logon
+        using both "company.local" and "company.com" so that people can use their username@company.com emails to
+        login.
+        Similarly, after a merger/acquisition, this may be used to support a smooth transition if trust relationships
+        aren't used - where the domains are merged while still allowing "@company1.local" and "@company2.local"
+        emails to be used for login (since many other services may be using AD for auth).
 
     is_domain_close_in_time_to_localhost(self, allowed_drift_seconds=None) -> bool
         Get whether the domain time is close to the current local time.
@@ -263,6 +281,18 @@ You can also look up attributes about the things you look up by specifying a lis
                          may succeed or fail based on their availability.
         :returns: an ADGroup object or None if the group does not exist.
         :raises: a DuplicateNameException if more than one entry exists with this name.
+
+    def find_computer_by_principal_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
+                                        controls: List[Control] = None) -> Optional[ADComputer]:
+        Find a Computer in AD based on a specified userPrincipalName and return it along with any
+        requested attributes.
+        :param computer_name: The userPrincipalName name of the computer.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computer. Regardless of
+                                     what's specified, the computer's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADComputer object or None if the computer does not exist.
 
     find_group_by_sam_name(self, group_name: str, attributes_to_lookup: List[str] = None, controls: List[ldap3.protocol.rfc4511.Control] = None) -> Union[ms_active_directory.core.ad_objects.ADGroup, NoneType]
         Find a Group in AD based on a specified sAMAccountName name and return it along with any
@@ -406,6 +436,18 @@ You can also look up attributes about the things you look up by specifying a lis
                          may succeed or fail based on their availability.
         :returns: an ADUser object or None if the user does not exist.
         :raises: a DuplicateNameException if more than one entry exists with this name.
+
+    def find_user_by_principal_name(self, user_name: str, attributes_to_lookup: List[str] = None,
+                                    controls: List[Control] = None) -> Optional[ADUser]:
+        Find a User in AD based on a specified userPrincipalName and return it along with any
+        requested attributes.
+        :param user_name: The userPrincipalName name of the user.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the user. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADUser object or None if the user does not exist.
 
     find_user_by_sam_name(self, user_name: str, attributes_to_lookup: List[str] = None, controls: List[ldap3.protocol.rfc4511.Control] = None) -> Union[ms_active_directory.core.ad_objects.ADUser, NoneType]
         Find a User in AD based on a specified sAMAccountName name and return it along with any

@@ -125,8 +125,12 @@ class ADSession:
         self._trusted_domain_list_cache = []
         self._last_trusted_domain_query_time = None
 
+    def is_anonymous(self) -> bool:
+        """ Returns True if the session is anonymous, False otherwise """
+        return not self.ldap_connection.user
+
     def is_authenticated(self) -> bool:
-        """ Returns if the session is currently authenticated """
+        """ Returns True if the session is currently authenticated """
         return self.ldap_connection.bound
 
     def is_encrypted(self) -> bool:
@@ -396,6 +400,8 @@ class ADSession:
                                           .format(user_dn, common_name, object_location))
 
         # construct userPrincipalName from username and domain
+        # if an alternate userPrincipalName is desired (e.g. logging on with an alternate domain name because a
+        # user is coming from the public internet via VPN) then this can be overridden with additional_user_attributes
         user_principal_name = username + '@' + self.domain_dns_name
 
         user_attributes = {
@@ -916,6 +922,16 @@ class ADSession:
                                                     search_base=policy_loc)
         return policies
 
+    def find_sid_for_domain(self) -> str:
+        """ Returns the SID identifier for the domain as a string. This will be unique even if multiple different
+        domains exist with the same DNS name (e.g. a domain was cloned from one data center to another) and
+        is a part of the SIDs of domain members.
+        This will be cached after one lookup because the domain SID doesn't change.
+
+        :returns: A string representing the domain SID.
+        """
+        return self.domain.find_sid(self.ldap_connection)
+
     def find_supported_sasl_mechanisms_for_domain(self) -> List[str]:
         """ Attempt to discover the SASL mechanisms supported by the domain and return them.
         This just builds upon the functionality that the domain has for this, as you don't need
@@ -957,6 +973,35 @@ class ADSession:
         self._trusted_domain_list_cache = copy.copy(trusted_domains)
         self._last_trusted_domain_query_time = now
         return trusted_domains
+
+    def find_upn_suffixes_for_domain(self) -> List[str]:
+        """ Get the user principal name suffixes for the domain. These are alternate domains that users might have
+        in their user principal name, and use for logging on.
+        For example, a domain that has a read-only domain controller exposed to the internet might support logon
+        using both "company.local" and "company.com" so that people can use their username@company.com emails to
+        login.
+        Similarly, after a merger/acquisition, this may be used to support a smooth transition if trust relationships
+        aren't used - where the domains are merged while still allowing "@company1.local" and "@company2.local"
+        emails to be used for login (since many other services may be using AD for auth).
+
+        :returns: A list of strings indicating valid user principal name suffixes for the domain.
+        """
+        # the domain dns name is implied and won't show up via ldap
+        suffixes = [self.domain_dns_name]
+
+        res = self.ldap_connection.search(search_base=ldap_constants.DOMAIN_WIDE_PARTITIONS_CONTAINER,
+                                          search_filter=ldap_constants.FIND_ANYTHING_FILTER,
+                                          search_scope=BASE,
+                                          attributes=[ldap_constants.AD_ADDITIONAL_UPN_SUFFIXES],
+                                          size_limit=1)
+        success, result, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        # this always exists so any non-success should raise an error
+        search_err = result['result'] != 0
+        if search_err:
+            raise DomainSearchException('Failed to search the domain for alternate UPN suffixes.')
+        base_attrs = response[0]['attributes']
+        suffixes.extend(base_attrs.get(ldap_constants.AD_ADDITIONAL_UPN_SUFFIXES, []))
+        return suffixes
 
     # FUNCTIONS FOR FINDING USERS AND GROUPS
 
@@ -1382,6 +1427,29 @@ class ADSession:
             return None
         return res[0]
 
+    def find_computer_by_principal_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
+                                        controls: List[Control] = None) -> Optional[ADComputer]:
+        """ Find a Computer in AD based on a specified userPrincipalName and return it along with any
+        requested attributes.
+        :param computer_name: The userPrincipalName name of the computer.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the computer. Regardless of
+                                     what's specified, the computer's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADComputer object or None if the computer does not exist.
+        """
+        # build a compound filter for users with this principal name
+        search_filter = '(&({upn_attr}={upn}){type_filter})'.format(
+            upn_attr=ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME,
+            upn=computer_name,
+            type_filter=ldap_constants.FIND_USER_FILTER)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 1, ADComputer, controls)
+        if not res:
+            return None
+        return res[0]
+
     def find_computer_by_sam_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
                                   controls: List[Control] = None) -> Optional[ADComputer]:
         """ Find a Computer in AD based on a specified sAMAccountName name and return it along with any
@@ -1526,6 +1594,29 @@ class ADSession:
             return None
         return res[0]
 
+    def find_user_by_principal_name(self, user_name: str, attributes_to_lookup: List[str] = None,
+                                    controls: List[Control] = None) -> Optional[ADUser]:
+        """ Find a User in AD based on a specified userPrincipalName and return it along with any
+        requested attributes.
+        :param user_name: The userPrincipalName name of the user.
+        :param attributes_to_lookup: A list of additional LDAP attributes to query for the user. Regardless of
+                                     what's specified, the user's name and object class attributes will be queried.
+        :param controls: A list of LDAP controls to use when performing the search. These can be used to specify
+                         whether or not certain properties/attributes are critical, which influences whether a search
+                         may succeed or fail based on their availability.
+        :returns: an ADUser object or None if the user does not exist.
+        """
+        # build a compound filter for users with this principal name
+        search_filter = '(&({upn_attr}={upn}){type_filter})'.format(
+            upn_attr=ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME,
+            upn=user_name,
+            type_filter=ldap_constants.FIND_USER_FILTER)
+        res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
+                                              attributes_to_lookup, 1, ADUser, controls)
+        if not res:
+            return None
+        return res[0]
+
     def find_user_by_sam_name(self, user_name: str, attributes_to_lookup: List[str] = None,
                               controls: List[Control] = None) -> Optional[ADUser]:
         """ Find a User in AD based on a specified sAMAccountName name and return it along with any
@@ -1595,21 +1686,36 @@ class ADSession:
         is_dn = ldap_utils.is_dn(name)
         dn_lookup_func = self.find_group_by_distinguished_name
         sam_lookup_func = self.find_group_by_sam_name
+        upn_lookup_func = None
         cn_lookup_func = self.find_groups_by_common_name
         if lookup_type is ADUser:
             dn_lookup_func = self.find_user_by_distinguished_name
             sam_lookup_func = self.find_user_by_sam_name
+            # if the name doesn't have an @ then it can't be a UPN, so skip that lookup
+            if '@' in name:
+                upn_lookup_func = self.find_user_by_principal_name
             cn_lookup_func = self.find_users_by_common_name
         elif lookup_type is ADComputer:
             dn_lookup_func = self.find_computer_by_distinguished_name
             sam_lookup_func = self.find_computer_by_sam_name
+            # if the name doesn't have an @ then it can't be a UPN, so skip that lookup
+            if '@' in name:
+                upn_lookup_func = self.find_computer_by_principal_name
             cn_lookup_func = self.find_computers_by_common_name
 
+        # distinguished name is the most specific, so it goes first
         if is_dn:
             return dn_lookup_func(name, attributes_to_lookup, controls=controls)
-        res = sam_lookup_func(name, attributes_to_lookup)
+        # look by UPN first if we have it, since it's the most specific after distinguished name
+        if upn_lookup_func:
+            res = upn_lookup_func(name, attributes_to_lookup, controls=controls)
+            if res:
+                return res
+        # sAMAccountName is more specific than common name, so look for that next
+        res = sam_lookup_func(name, attributes_to_lookup, controls=controls)
         if res:
             return res
+        # the least common and most likely to have duplicates
         result_list = cn_lookup_func(name, attributes_to_lookup, controls=controls)
         if not result_list:
             return None
@@ -1691,7 +1797,7 @@ class ADSession:
             mapping_dict[entity] = []
             if include_primary:
                 # get objectSid and primaryGroupID for entity
-                attributes = [ldap_constants.AD_ATTRIBUTE_OBJECT_SID, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
+                attributes = [ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
                 entity_obj = self.find_object_by_distinguished_name(entity_dn, attributes, controls)
 
                 entity_sid = entity_obj.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
@@ -1700,7 +1806,8 @@ class ADSession:
                 # only add the filter for primary group if the entity has objectSid and primaryGroupID attributes
                 if entity_sid and primary_group_id:
                     # get the objectSid for the primary group given the entity's objectSid and the primaryGroupID
-                    group_sid = ldap_utils.construct_primary_group_sid(entity_sid, primary_group_id)
+                    domain_sid = self.find_sid_for_domain()
+                    group_sid = ldap_utils.construct_primary_group_sid(domain_sid, primary_group_id)
                     primary_filter_piece = '({}={})'.format(ldap_constants.AD_ATTRIBUTE_OBJECT_SID, group_sid)
                     filter_pieces.add(primary_filter_piece)
 
@@ -1745,7 +1852,7 @@ class ADSession:
             # complexity of checking all input entities for all results to O(n^2) instead of O(n^3).
             # cast all members to lowercase for a case-insensitive membership check. our normalization
             # function gave use lowercase DNs
-            member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER))
+            member_set = set(member.lower() for member in result.get(ldap_constants.AD_ATTRIBUTE_MEMBER) or [])
             group_sid = result.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID) if include_primary else None
             for entity_dn in entity_dns_to_entities:
                 if include_primary and primary_group_dict[entity_dn] == group_sid:
@@ -1930,7 +2037,7 @@ class ADSession:
         :raises: ObjectNotFoundException if the account cannot be found.
         """
         # get objectSid and primaryGroupID attributes for account
-        attributes = [ldap_constants.AD_ATTRIBUTE_OBJECT_SID, ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
+        attributes = [ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID]
         if isinstance(account, ADUser) or isinstance(account, ADComputer):
             # if our account is an ADUser or ADComputer, we can do the lookup by DN which is most efficient
             informed_account = self.find_user_by_distinguished_name(account.distinguished_name, attributes,
@@ -1944,11 +2051,11 @@ class ADSession:
             raise ObjectNotFoundException('No account could be found in the domain with the User or Computer object '
                                           'class using account {}'.format(account))
 
-        account_sid = informed_account.get(ldap_constants.AD_ATTRIBUTE_OBJECT_SID)
+        domain_sid = self.find_sid_for_domain()
         primary_group_id = informed_account.get(ldap_constants.AD_ATTRIBUTE_PRIMARY_GROUP_ID)
 
         # get the objectSid for the primary group given the account's objectSid and the primaryGroupID
-        group_sid = ldap_utils.construct_primary_group_sid(account_sid, primary_group_id)
+        group_sid = ldap_utils.construct_primary_group_sid(domain_sid, primary_group_id)
         return self.find_group_by_sid(group_sid, attributes_to_lookup, controls)
 
     def set_primary_group_for_account(self, account: Union[str, ADUser, ADComputer],

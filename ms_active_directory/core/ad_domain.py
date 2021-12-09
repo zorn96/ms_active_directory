@@ -69,6 +69,7 @@ from ms_active_directory.environment.ldap.ldap_constants import (
     AD_ATTRIBUTE_ENCRYPTION_TYPES,
     AD_ATTRIBUTE_NETBIOS_NAME,
     AD_ATTRIBUTE_OBJECT_CLASS,
+    AD_ATTRIBUTE_OBJECT_SID,
     AD_DOMAIN_DNS_ROOT,
     AD_DOMAIN_FUNCTIONAL_LEVEL,
     AD_DOMAIN_SUPPORTED_SASL_MECHANISMS,
@@ -446,6 +447,7 @@ class ADDomain:
         self.source_ip = source_ip
         self.netbios_name = netbios_name
         self.auto_configure_kerberos_client = auto_configure_kerberos_client
+        self._sid = None
         # discover ldap servers and kerberos servers if we weren't provided any and weren't told not to
         if not ldap_servers_or_uris and discover_ldap_servers:
             ldap_servers_or_uris = discover_ldap_domain_controllers_in_domain(self.domain, site=self.site,
@@ -646,6 +648,37 @@ class ADDomain:
         logger.info('Found netbios name %s for domain %s', nb_name, self.domain)
         self.netbios_name = nb_name
         return self.netbios_name
+
+    def find_sid(self, ldap_connection: Connection = None) -> str:
+        """ Returns the SID identifier for the domain as a string. This will be unique even if multiple different
+        domains exist with the same DNS name (e.g. a domain was cloned from one data center to another) and
+        is a part of the SIDs of domain members.
+        This will be cached after one lookup because the domain SID doesn't change.
+
+        :param ldap_connection: An ldap3 connection to the domain, optional.
+        :return: A string representing the domain SID.
+        """
+        if self._sid is not None:
+            return self._sid
+
+        if ldap_connection is None:
+            logger.info('Creating a new anonymous connection to read domain SID')
+            # try with an anonymous connection
+            ldap_connection = self.create_session_as_user().get_ldap_connection()
+
+        search_base = construct_ldap_base_dn_from_domain(self.domain)
+        res = ldap_connection.search(search_base=search_base, search_filter=FIND_ANYTHING_FILTER,
+                                     search_scope=BASE, attributes=[AD_ATTRIBUTE_OBJECT_SID],
+                                     size_limit=1)
+        success, result, response, _ = process_ldap3_conn_return_value(ldap_connection, res)
+        # this should exist so no results is a failure regardless of the reason
+        search_err = result['result'] != 0
+        if search_err:
+            raise DomainSearchException('Failed to search the domain for its SID. Result: {}'
+                                        .format(result))
+        base_attrs = response[0]['attributes']
+        self._sid = base_attrs.get(AD_ATTRIBUTE_OBJECT_SID)
+        return self._sid
 
     def find_supported_sasl_mechanisms(self, ldap_connection: Connection = None) -> List[str]:
         """ Find the supported SASL mechanisms for this domain.
