@@ -126,6 +126,14 @@ There are functions for finding domain resources, such as DNS servers, CA certif
 
         :returns: A list of ADGroupPolicy objects representing the policies in the domain.
 
+    def find_sid_for_domain(self) -> str:
+        Returns the SID identifier for the domain as a string. This will be unique even if multiple different
+        domains exist with the same DNS name (e.g. a domain was cloned from one data center to another) and
+        is a part of the SIDs of domain members.
+        This will be cached after one lookup because the domain SID doesn't change.
+
+        :returns: A string representing the domain SID.
+
     find_supported_sasl_mechanisms_for_domain(self) -> List[str]
         Attempt to discover the SASL mechanisms supported by the domain and return them.
         This just builds upon the functionality that the domain has for this, as you don't need
@@ -134,6 +142,16 @@ There are functions for finding domain resources, such as DNS servers, CA certif
         This is included in the session object for completeness.
         :returns: A list of strings indicating the supported SASL mechanisms for the domain.
                   ex: ['GSSAPI', 'GSS-SPNEGO', 'EXTERNAL']
+
+    def find_upn_suffixes_for_domain(self) -> List[str]:
+        Get the user principal name suffixes for the domain. These are alternate domains that users might have
+        in their user principal name, and use for logging on.
+        For example, a domain that has a read-only domain controller exposed to the internet might support logon
+        using both "company.local" and "company.com" so that people can use their username@company.com emails to
+        login.
+        Similarly, after a merger/acquisition, this may be used to support a smooth transition if trust relationships
+        aren't used - where the domains are merged while still allowing "@company1.local" and "@company2.local"
+        emails to be used for login (since many other services may be using AD for auth).
 
     is_domain_close_in_time_to_localhost(self, allowed_drift_seconds=None) -> bool
         Get whether the domain time is close to the current local time.

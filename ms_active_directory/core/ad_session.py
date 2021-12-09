@@ -125,8 +125,12 @@ class ADSession:
         self._trusted_domain_list_cache = []
         self._last_trusted_domain_query_time = None
 
+    def is_anonymous(self) -> bool:
+        """ Returns True if the session is anonymous, False otherwise """
+        return not self.ldap_connection.user
+
     def is_authenticated(self) -> bool:
-        """ Returns if the session is currently authenticated """
+        """ Returns True if the session is currently authenticated """
         return self.ldap_connection.bound
 
     def is_encrypted(self) -> bool:
@@ -396,6 +400,8 @@ class ADSession:
                                           .format(user_dn, common_name, object_location))
 
         # construct userPrincipalName from username and domain
+        # if an alternate userPrincipalName is desired (e.g. logging on with an alternate domain name because a
+        # user is coming from the public internet via VPN) then this can be overridden with additional_user_attributes
         user_principal_name = username + '@' + self.domain_dns_name
 
         user_attributes = {
@@ -967,6 +973,35 @@ class ADSession:
         self._trusted_domain_list_cache = copy.copy(trusted_domains)
         self._last_trusted_domain_query_time = now
         return trusted_domains
+
+    def find_upn_suffixes_for_domain(self) -> List[str]:
+        """ Get the user principal name suffixes for the domain. These are alternate domains that users might have
+        in their user principal name, and use for logging on.
+        For example, a domain that has a read-only domain controller exposed to the internet might support logon
+        using both "company.local" and "company.com" so that people can use their username@company.com emails to
+        login.
+        Similarly, after a merger/acquisition, this may be used to support a smooth transition if trust relationships
+        aren't used - where the domains are merged while still allowing "@company1.local" and "@company2.local"
+        emails to be used for login (since many other services may be using AD for auth).
+
+        :returns: A list of strings indicating valid user principal name suffixes for the domain.
+        """
+        # the domain dns name is implied and won't show up via ldap
+        suffixes = [self.domain_dns_name]
+
+        res = self.ldap_connection.search(search_base=ldap_constants.DOMAIN_WIDE_PARTITIONS_CONTAINER,
+                                          search_filter=ldap_constants.FIND_ANYTHING_FILTER,
+                                          search_scope=BASE,
+                                          attributes=[ldap_constants.AD_ADDITIONAL_UPN_SUFFIXES],
+                                          size_limit=1)
+        success, result, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res)
+        # this always exists so any non-success should raise an error
+        search_err = result['result'] != 0
+        if search_err:
+            raise DomainSearchException('Failed to search the domain for alternate UPN suffixes.')
+        base_attrs = response[0]['attributes']
+        suffixes.extend(base_attrs.get(ldap_constants.AD_ADDITIONAL_UPN_SUFFIXES, []))
+        return suffixes
 
     # FUNCTIONS FOR FINDING USERS AND GROUPS
 
