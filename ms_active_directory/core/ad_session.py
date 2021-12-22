@@ -2174,7 +2174,7 @@ class ADSession:
                 raise ObjectNotFoundException('No group could be found in the domain with the Group object class using '
                                               'group {}'.format(group))
             # add our members to our set and update our map
-            member_dns = informed_group_object.get(ldap_constants.AD_ATTRIBUTE_MEMBER)
+            member_dns = informed_group_object.get(ldap_constants.AD_ATTRIBUTE_MEMBER) or []
             all_member_dns_set.update(member_dns)
             group_to_member_dn_map[group] = member_dns
 
