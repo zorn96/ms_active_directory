@@ -2824,6 +2824,7 @@ class ADSession:
                                                      rights_guids_to_add: List[Union[ADRightsGuid, str]] = None,
                                                      read_property_guids_to_add: List[str] = None,
                                                      write_property_guids_to_add: List[str] = None,
+                                                     allow_new_permissions: bool = True,
                                                      raise_exception_on_failure: bool = True,
                                                      skip_validation: bool = False) -> bool:
         """ Add specified permissions to the security descriptor on an object for specified SIDs.
@@ -2853,6 +2854,10 @@ class ADSession:
                                            SIDs will be granted the right to read. These must be strings.
         :param write_property_guids_to_add: A list of property guids that represent properties of the object that the
                                             SIDs will be granted the right to write. These must be strings.
+        :param allow_new_permissions: If True, the new permissions will be added using ALLOW ACEs, granting access to
+                                      the SIDs specified. If False, the new permissions will be DENY ACEs, and so
+                                      access to actions/information will be denied.
+                                      If not specified, defaults to True.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
         :param skip_validation: If true, assume all distinguished names exist and do not look them up.
@@ -2898,7 +2903,8 @@ class ADSession:
                                                                          access_masks=access_masks_to_add,
                                                                          privilege_guids=priv_guid_strings,
                                                                          read_property_guids=read_property_guids_to_add,
-                                                                         write_property_guids=write_property_guids_to_add)
+                                                                         write_property_guids=write_property_guids_to_add,
+                                                                         allow_new_permissions=allow_new_permissions)
         return self.set_object_security_descriptor(ad_object_to_modify, current_sd,
                                                    raise_exception_on_failure=raise_exception_on_failure,
                                                    skip_validation=skip_validation)
@@ -2910,6 +2916,7 @@ class ADSession:
                                                     rights_guids_to_add: List[Union[ADRightsGuid, str]] = None,
                                                     read_property_guids_to_add: List[str] = None,
                                                     write_property_guids_to_add: List[str] = None,
+                                                    allow_new_permissions: bool = True,
                                                     raise_exception_on_failure: bool = True,
                                                     skip_validation: bool = False) -> bool:
         """ Add specified permissions to the security descriptor on a group for specified SIDs.
@@ -2939,6 +2946,10 @@ class ADSession:
                                            SIDs will be granted the right to read. These must be strings.
         :param write_property_guids_to_add: A list of property guids that represent properties of the group that the
                                             SIDs will be granted the right to write. These must be strings.
+        :param allow_new_permissions: If True, the new permissions will be added using ALLOW ACEs, granting access to
+                                      the SIDs specified. If False, the new permissions will be DENY ACEs, and so
+                                      access to actions/information will be denied.
+                                      If not specified, defaults to True.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
         :param skip_validation: If true, assume all distinguished names exist and do not look them up.
@@ -2956,6 +2967,7 @@ class ADSession:
                                                                  access_masks_to_add, rights_guids_to_add,
                                                                  read_property_guids_to_add,
                                                                  write_property_guids_to_add,
+                                                                 allow_new_permissions=allow_new_permissions,
                                                                  raise_exception_on_failure=raise_exception_on_failure,
                                                                  skip_validation=skip_validation)
 
@@ -2966,6 +2978,7 @@ class ADSession:
                                                    rights_guids_to_add: List[Union[ADRightsGuid, str]] = None,
                                                    read_property_guids_to_add: List[str] = None,
                                                    write_property_guids_to_add: List[str] = None,
+                                                   allow_new_permissions: bool = True,
                                                    raise_exception_on_failure: bool = True,
                                                    skip_validation: bool = False) -> bool:
         """ Add specified permissions to the security descriptor on a user for specified SIDs.
@@ -2995,6 +3008,10 @@ class ADSession:
                                            SIDs will be granted the right to read. These must be strings.
         :param write_property_guids_to_add: A list of property guids that represent properties of the user that the
                                             SIDs will be granted the right to write. These must be strings.
+        :param allow_new_permissions: If True, the new permissions will be added using ALLOW ACEs, granting access to
+                                      the SIDs specified. If False, the new permissions will be DENY ACEs, and so
+                                      access to actions/information will be denied.
+                                      If not specified, defaults to True.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
         :param skip_validation: If true, assume all distinguished names exist and do not look them up.
@@ -3012,6 +3029,7 @@ class ADSession:
                                                                  access_masks_to_add, rights_guids_to_add,
                                                                  read_property_guids_to_add,
                                                                  write_property_guids_to_add,
+                                                                 allow_new_permissions=allow_new_permissions,
                                                                  raise_exception_on_failure=raise_exception_on_failure,
                                                                  skip_validation=skip_validation)
 
@@ -3022,6 +3040,7 @@ class ADSession:
                                                        rights_guids_to_add: List[Union[ADRightsGuid, str]] = None,
                                                        read_property_guids_to_add: List[str] = None,
                                                        write_property_guids_to_add: List[str] = None,
+                                                       allow_new_permissions: bool = True,
                                                        raise_exception_on_failure: bool = True,
                                                        skip_validation: bool = False) -> bool:
         """ Add specified permissions to the security descriptor on a computer for specified SIDs.
@@ -3051,6 +3070,10 @@ class ADSession:
                                            SIDs will be granted the right to read. These must be strings.
         :param write_property_guids_to_add: A list of property guids that represent properties of the computer that the
                                             SIDs will be granted the right to write. These must be strings.
+        :param allow_new_permissions: If True, the new permissions will be added using ALLOW ACEs, granting access to
+                                      the SIDs specified. If False, the new permissions will be DENY ACEs, and so
+                                      access to actions/information will be denied.
+                                      If not specified, defaults to True.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
         :param skip_validation: If true, assume all distinguished names exist and do not look them up.
@@ -3068,6 +3091,7 @@ class ADSession:
                                                                  access_masks_to_add, rights_guids_to_add,
                                                                  read_property_guids_to_add,
                                                                  write_property_guids_to_add,
+                                                                 allow_new_permissions=allow_new_permissions,
                                                                  raise_exception_on_failure=raise_exception_on_failure,
                                                                  skip_validation=skip_validation)
 
