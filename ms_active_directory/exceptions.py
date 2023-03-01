@@ -133,6 +133,12 @@ class ObjectCreationException(MsActiveDirectoryException):
         super().__init__(exception_str)
 
 
+class ObjectDeletionException(MsActiveDirectoryException):
+    """ An exception raised when an error is encountered deleting an object """
+    def __init__(self, exception_str):
+        super().__init__(exception_str)
+
+
 class ObjectNotFoundException(MsActiveDirectoryException):
     """ An exception raised when an object cannot be found when performing validation that an object
     exists as part of a function.
