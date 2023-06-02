@@ -632,12 +632,12 @@ class ADSession:
         raise ObjectDeletionException('An exception was encountered deleting an object with distinguished name {}.'
                                       'LDAP result: {}'.format(object_dn, result))
 
-    def delete_user(self, username: str, object_location: str = None, skip_validation: bool = False):
+    def delete_user_by_common_name(self, username: str, object_location: str = None, skip_validation: bool = False):
         """ Use the session to delete a managed user from the domain.
         :param username: The login username for the user to delete from the AD domain. This will be used to determine
                          the sAMAccountName for the user.
         :param object_location: The distinguished name of the location within the domain where the group will be
-                                created. It may be a relative distinguished name (not including the domain component)
+                                deleted. It may be a relative distinguished name (not including the domain component)
                                 or a full distinguished name.  If not specified, defaults to CN=Users which is
                                 standard for Active Directory.
         :param skip_validation: If true, skips the validation of the object location. Things like allowable
@@ -649,20 +649,24 @@ class ADSession:
         logger.debug('Request to delete managed user in domain %s with the following attributes: username=%s',
                      self.domain_dns_name, username)
 
+        if not self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, username):
+            raise ObjectDeletionException('No object with sAMAccountName {} exists so a user may not be '
+                                          'deleted with the name {}'.format(username, username))
+
         if object_location is None:
             # even if we're skipping validation, we should still do a null check for the default location
             object_location = ldap_constants.DEFAULT_USER_GROUP_LOCATION
 
         user_dn = ldap_utils.construct_object_distinguished_name(username, object_location, self.domain_dns_name)
         if not self.dn_exists_in_domain(user_dn):
-            raise ObjectDeletionException('There does not exist an entry in the  domain with distinguished name {} and so a '
+            raise ObjectDeletionException('No entry in the domain with distinguished name {} exists and so a '
                                           'user may not be deleted in the domain with name {} in location {}. '
                                           'Please use a different name or location.'
                                           .format(user_dn, username, object_location))
 
         return self._delete_object(user_dn)
 
-    def delete_group(self, group_name: str, object_location: str = None, skip_validation: bool = False):
+    def delete_group_by_common_name(self, group_name: str, object_location: str = None, skip_validation: bool = False):
         """ Use the session to delete a group in the domain.
         :param group_name: The common name of the group to delete from the AD domain. This will be used to determine
                            the sAMAccountName for the group.
@@ -681,7 +685,7 @@ class ADSession:
                      group_name, object_location)
 
         if not self.object_exists_in_domain_with_attribute(ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME, group_name):
-            raise ObjectDeletionException('An object does not exists with sAMAccountName {} so a group may not be '
+            raise ObjectDeletionException('No object with sAMAccountName {} exists so a group may not be '
                                           'deleted with the name {}'.format(group_name, group_name))
 
         # get or normalize our group location. the end format is as a relative distinguished name
@@ -698,7 +702,7 @@ class ADSession:
         group_dn = ldap_utils.construct_object_distinguished_name(group_name, object_location,
                                                                   self.domain_dns_name)
         if not self.dn_exists_in_domain(group_dn):
-            raise ObjectCreationException('There exists an object in the domain with distinguished name {} and so a '
+            raise ObjectDeletionException('No object in the domain with distinguished name {} exists and so a '
                                           'group may not be deleted from the domain with name {} in location {}. '
                                           'Please use a different name or location.'
                                           .format(group_dn, group_name, object_location))
