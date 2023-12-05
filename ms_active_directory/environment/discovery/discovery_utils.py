@@ -293,14 +293,24 @@ def _check_kdc_availability_and_rtt(server_host: str, server_port: str, source_i
     kdc_uri = format_utils.format_hostname_or_ip_and_port_to_uri(server_host, server_port,
                                                                  is_ipv6_fmt=False)
 
-    test_socket4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    addr_tuple4 = (server_host, server_port)
+    try:
+        test_socket6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        addr_tuple6 = (server_host, server_port, 0, 0)
+        candidates.append((test_socket6, addr_tuple6))
+    except:
+        logger.debug('ipv6 unavailable on local system')
 
-    test_socket6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-    addr_tuple6 = (server_host, server_port, 0, 0)
+    try:
+        test_socket4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        addr_tuple4 = (server_host, server_port)
+        candidates.append((test_socket4, addr_tuple4))
+    except:
+        logger.debug('ipv4 unavailable on local system')
 
-    candidates.append((test_socket6, addr_tuple6))
-    candidates.append((test_socket4, addr_tuple4))
+    if not candidates:
+        logger.warning('Failed to create ipv4 and ipv6 sockets - this could indicate the python environment is '
+                       'running with no access to networking')
+        return None
 
     for temp_socket, temp_addr_tuple in candidates:
         try:
