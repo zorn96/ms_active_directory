@@ -2268,9 +2268,10 @@ class ADSession:
                 raise ObjectNotFoundException('No group could be found in the domain with the Group object class using '
                                               'group {}'.format(group))
             # add our members to our set and update our map
-            member_dns = informed_group_object.get(ldap_constants.AD_ATTRIBUTE_MEMBER)
-            all_member_dns_set.update(member_dns)
-            group_to_member_dn_map[group] = member_dns
+            if informed_group_object.get('member') is not None:
+                member_dns = informed_group_object.get(ldap_constants.AD_ATTRIBUTE_MEMBER)
+                all_member_dns_set.update(member_dns)
+                group_to_member_dn_map[group] = member_dns
 
         logger.debug('Found %s unique members across %s groups', len(all_member_dns_set), len(groups))
         # now we need to look up all of the members.
@@ -2293,11 +2294,14 @@ class ADSession:
 
         group_to_members_map = {}
         for group in groups:
-            group_member_dns = group_to_member_dn_map[group]
             group_to_members_map[group] = []
-            for dn in group_member_dns:
-                member_obj = member_dn_to_objects[dn]
-                group_to_members_map[group].append(member_obj)
+            try:
+                group_member_dns = group_to_member_dn_map[group]
+                for dn in group_member_dns:
+                    member_obj = member_dn_to_objects[dn]
+                    group_to_members_map[group].append(member_obj)
+            except:
+                pass
         return group_to_members_map
 
     def find_members_of_group_recursive(self, group: Union[str, ADGroup], attributes_to_lookup: List[str] = None,
