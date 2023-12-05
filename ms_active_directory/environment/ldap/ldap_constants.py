@@ -65,6 +65,7 @@ AD_ATTRIBUTE_NAME = 'name'
 AD_ATTRIBUTE_OBJECT_CLASS = 'objectClass'
 AD_ATTRIBUTE_OBJECT_SID = 'objectSID'
 AD_ATTRIBUTE_NETBIOS_NAME = 'nETBIOSName'
+AD_ATTRIBUTE_MAIL = 'mail'
 
 # keys for general user, group, and computer attributes
 AD_ATTRIBUTE_USER_ACCOUNT_CONTROL = 'userAccountControl'

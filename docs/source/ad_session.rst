@@ -126,7 +126,7 @@ There are functions for finding domain resources, such as DNS servers, CA certif
 
         :returns: A list of ADGroupPolicy objects representing the policies in the domain.
 
-    def find_sid_for_domain(self) -> str:
+    find_sid_for_domain(self) -> str:
         Returns the SID identifier for the domain as a string. This will be unique even if multiple different
         domains exist with the same DNS name (e.g. a domain was cloned from one data center to another) and
         is a part of the SIDs of domain members.
@@ -143,7 +143,7 @@ There are functions for finding domain resources, such as DNS servers, CA certif
         :returns: A list of strings indicating the supported SASL mechanisms for the domain.
                   ex: ['GSSAPI', 'GSS-SPNEGO', 'EXTERNAL']
 
-    def find_upn_suffixes_for_domain(self) -> List[str]:
+    find_upn_suffixes_for_domain(self) -> List[str]:
         Get the user principal name suffixes for the domain. These are alternate domains that users might have
         in their user principal name, and use for logging on.
         For example, a domain that has a read-only domain controller exposed to the internet might support logon
@@ -282,7 +282,7 @@ You can also look up attributes about the things you look up by specifying a lis
         :returns: an ADGroup object or None if the group does not exist.
         :raises: a DuplicateNameException if more than one entry exists with this name.
 
-    def find_computer_by_principal_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
+    find_computer_by_principal_name(self, computer_name: str, attributes_to_lookup: List[str] = None,
                                         controls: List[Control] = None) -> Optional[ADComputer]:
         Find a Computer in AD based on a specified userPrincipalName and return it along with any
         requested attributes.
@@ -437,7 +437,7 @@ You can also look up attributes about the things you look up by specifying a lis
         :returns: an ADUser object or None if the user does not exist.
         :raises: a DuplicateNameException if more than one entry exists with this name.
 
-    def find_user_by_principal_name(self, user_name: str, attributes_to_lookup: List[str] = None,
+    find_user_by_principal_name(self, user_name: str, attributes_to_lookup: List[str] = None,
                                     controls: List[Control] = None) -> Optional[ADUser]:
         Find a User in AD based on a specified userPrincipalName and return it along with any
         requested attributes.
@@ -1438,7 +1438,7 @@ Overwriting security descriptors::
 
 Appending permissions to security descriptors::
 
-    add_permission_to_computer_security_descriptor(self, computer: Union[str, ms_active_directory.core.ad_objects.ADComputer], sids_to_grant_permissions_to: List[Union[str, ms_active_directory.environment.security.security_descriptor_utils.ObjectSid, ms_active_directory.environment.security.security_config_constants.WellKnownSID]], access_masks_to_add: List[ms_active_directory.environment.security.security_descriptor_utils.AccessMask] = None, rights_guids_to_add: List[Union[ms_active_directory.environment.security.ad_security_guids.ADRightsGuid, str]] = None, read_property_guids_to_add: List[str] = None, write_property_guids_to_add: List[str] = None, raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool
+    add_permission_to_computer_security_descriptor(self, computer: Union[str, ms_active_directory.core.ad_objects.ADComputer], sids_to_grant_permissions_to: List[Union[str, ms_active_directory.environment.security.security_descriptor_utils.ObjectSid, ms_active_directory.environment.security.security_config_constants.WellKnownSID]], access_masks_to_add: List[ms_active_directory.environment.security.security_descriptor_utils.AccessMask] = None, rights_guids_to_add: List[Union[ms_active_directory.environment.security.ad_security_guids.ADRightsGuid, str]] = None, read_property_guids_to_add: List[str] = None, write_property_guids_to_add: List[str] = None, allow_new_permissions: bool = True, raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool
         Add specified permissions to the security descriptor on a computer for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the computer, via adding access masks or rights guids respectively. It can also give
@@ -1466,6 +1466,10 @@ Appending permissions to security descriptors::
                                            SIDs will be granted the right to read. These must be strings.
         :param write_property_guids_to_add: A list of property guids that represent properties of the computer that the
                                             SIDs will be granted the right to write. These must be strings.
+        :param allow_new_permissions: If True, the new permissions will be added using ALLOW ACEs, granting access to
+                                      the SIDs specified. If False, the new permissions will be DENY ACEs, and so
+                                      access to actions/information will be denied.
+                                      If not specified, defaults to True.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
         :param skip_validation: If true, assume all distinguished names exist and do not look them up.
@@ -1478,7 +1482,7 @@ Appending permissions to security descriptors::
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
 
-    add_permission_to_group_security_descriptor(self, group, sids_to_grant_permissions_to: List[Union[str, ms_active_directory.environment.security.security_descriptor_utils.ObjectSid, ms_active_directory.environment.security.security_config_constants.WellKnownSID]], access_masks_to_add: List[ms_active_directory.environment.security.security_descriptor_utils.AccessMask] = None, rights_guids_to_add: List[Union[ms_active_directory.environment.security.ad_security_guids.ADRightsGuid, str]] = None, read_property_guids_to_add: List[str] = None, write_property_guids_to_add: List[str] = None, raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool
+    add_permission_to_group_security_descriptor(self, group, sids_to_grant_permissions_to: List[Union[str, ms_active_directory.environment.security.security_descriptor_utils.ObjectSid, ms_active_directory.environment.security.security_config_constants.WellKnownSID]], access_masks_to_add: List[ms_active_directory.environment.security.security_descriptor_utils.AccessMask] = None, rights_guids_to_add: List[Union[ms_active_directory.environment.security.ad_security_guids.ADRightsGuid, str]] = None, read_property_guids_to_add: List[str] = None, write_property_guids_to_add: List[str] = None, allow_new_permissions: bool = True, raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool
         Add specified permissions to the security descriptor on a group for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the group, via adding access masks or rights guids respectively. It can also give
@@ -1506,6 +1510,10 @@ Appending permissions to security descriptors::
                                            SIDs will be granted the right to read. These must be strings.
         :param write_property_guids_to_add: A list of property guids that represent properties of the group that the
                                             SIDs will be granted the right to write. These must be strings.
+        :param allow_new_permissions: If True, the new permissions will be added using ALLOW ACEs, granting access to
+                                      the SIDs specified. If False, the new permissions will be DENY ACEs, and so
+                                      access to actions/information will be denied.
+                                      If not specified, defaults to True.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
         :param skip_validation: If true, assume all distinguished names exist and do not look them up.
@@ -1518,7 +1526,7 @@ Appending permissions to security descriptors::
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
 
-    add_permission_to_object_security_descriptor(self, ad_object_to_modify: Union[str, ms_active_directory.core.ad_objects.ADObject], sids_to_grant_permissions_to: List[Union[str, ms_active_directory.environment.security.security_descriptor_utils.ObjectSid, ms_active_directory.environment.security.security_config_constants.WellKnownSID]], access_masks_to_add: List[ms_active_directory.environment.security.security_descriptor_utils.AccessMask] = None, rights_guids_to_add: List[Union[ms_active_directory.environment.security.ad_security_guids.ADRightsGuid, str]] = None, read_property_guids_to_add: List[str] = None, write_property_guids_to_add: List[str] = None, raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool
+    add_permission_to_object_security_descriptor(self, ad_object_to_modify: Union[str, ms_active_directory.core.ad_objects.ADObject], sids_to_grant_permissions_to: List[Union[str, ms_active_directory.environment.security.security_descriptor_utils.ObjectSid, ms_active_directory.environment.security.security_config_constants.WellKnownSID]], access_masks_to_add: List[ms_active_directory.environment.security.security_descriptor_utils.AccessMask] = None, rights_guids_to_add: List[Union[ms_active_directory.environment.security.ad_security_guids.ADRightsGuid, str]] = None, read_property_guids_to_add: List[str] = None, write_property_guids_to_add: List[str] = None, allow_new_permissions: bool = True, raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool
         Add specified permissions to the security descriptor on an object for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the object, via adding access masks or rights guids respectively. It can also give
@@ -1546,6 +1554,10 @@ Appending permissions to security descriptors::
                                            SIDs will be granted the right to read. These must be strings.
         :param write_property_guids_to_add: A list of property guids that represent properties of the object that the
                                             SIDs will be granted the right to write. These must be strings.
+        :param allow_new_permissions: If True, the new permissions will be added using ALLOW ACEs, granting access to
+                                      the SIDs specified. If False, the new permissions will be DENY ACEs, and so
+                                      access to actions/information will be denied.
+                                      If not specified, defaults to True.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
         :param skip_validation: If true, assume all distinguished names exist and do not look them up.
@@ -1558,7 +1570,7 @@ Appending permissions to security descriptors::
         :raises: PermissionDeniedException if we fail to modify the Security Descriptor and raise_exception_on_failure
                  is true
 
-    add_permission_to_user_security_descriptor(self, user: Union[str, ms_active_directory.core.ad_objects.ADUser], sids_to_grant_permissions_to: List[Union[str, ms_active_directory.environment.security.security_descriptor_utils.ObjectSid, ms_active_directory.environment.security.security_config_constants.WellKnownSID]], access_masks_to_add: List[ms_active_directory.environment.security.security_descriptor_utils.AccessMask] = None, rights_guids_to_add: List[Union[ms_active_directory.environment.security.ad_security_guids.ADRightsGuid, str]] = None, read_property_guids_to_add: List[str] = None, write_property_guids_to_add: List[str] = None, raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool
+    add_permission_to_user_security_descriptor(self, user: Union[str, ms_active_directory.core.ad_objects.ADUser], sids_to_grant_permissions_to: List[Union[str, ms_active_directory.environment.security.security_descriptor_utils.ObjectSid, ms_active_directory.environment.security.security_config_constants.WellKnownSID]], access_masks_to_add: List[ms_active_directory.environment.security.security_descriptor_utils.AccessMask] = None, rights_guids_to_add: List[Union[ms_active_directory.environment.security.ad_security_guids.ADRightsGuid, str]] = None, read_property_guids_to_add: List[str] = None, write_property_guids_to_add: List[str] = None, allow_new_permissions: bool = True, raise_exception_on_failure: bool = True, skip_validation: bool = False) -> bool
         Add specified permissions to the security descriptor on a user for specified SIDs.
         This can be used to grant 1 or more other users/groups/computers/etc. the right to take broad actions or narrow
         privileged actions on the user, via adding access masks or rights guids respectively. It can also give
@@ -1586,6 +1598,10 @@ Appending permissions to security descriptors::
                                            SIDs will be granted the right to read. These must be strings.
         :param write_property_guids_to_add: A list of property guids that represent properties of the user that the
                                             SIDs will be granted the right to write. These must be strings.
+        :param allow_new_permissions: If True, the new permissions will be added using ALLOW ACEs, granting access to
+                                      the SIDs specified. If False, the new permissions will be DENY ACEs, and so
+                                      access to actions/information will be denied.
+                                      If not specified, defaults to True.
         :param raise_exception_on_failure: A boolean indicating if an exception should be raised if we fail to update
                                            the security descriptor, instead of returning False. defaults to True
         :param skip_validation: If true, assume all distinguished names exist and do not look them up.

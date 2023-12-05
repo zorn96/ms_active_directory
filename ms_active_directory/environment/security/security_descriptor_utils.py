@@ -95,13 +95,17 @@ def add_permissions_to_security_descriptor_dacl(current_security_descriptor_byte
                                                 access_masks: List['AccessMask'] = None,
                                                 privilege_guids: List[str] = None,
                                                 read_property_guids: List[str] = None,
-                                                write_property_guids: List[str] = None):
+                                                write_property_guids: List[str] = None,
+                                                allow_new_permissions: bool = True):
     """ Given a bytestring for the current security descriptor on an Active Directory object,
     an SID to add permissions for, an optional list of access masks, and an optional list of
     privilege guids, we construct new ACE entries for every access mask and privilege guid we
     want to add.
     We then add these ACEs to the DACL of the security descriptor and compute the new security
     descriptor.
+    The new ACEs can be ALLOW ACEs, to give principals access to some permission, or DENY ACEs to
+    ensure that principals cannot access certain actions/information. In the case of DENY ACEs,
+    they will be pre-pended to the DACL, while ALLOW ACEs will be appended.
 
     This function works even if we're adding access masks and privilege guids that already exist
     for the on the object for the given SID. Active Directory will de-dupe the ACEs and collapse
@@ -110,15 +114,16 @@ def add_permissions_to_security_descriptor_dacl(current_security_descriptor_byte
     current_sd = SelfRelativeSecurityDescriptor()
     current_sd.parse_structure_from_bytes(current_security_descriptor_bytes)
     current_sd = add_permissions_to_security_descriptor(current_sd, sid_string, access_masks, privilege_guids,
-                                                        read_property_guids, write_property_guids)
-
+                                                        read_property_guids, write_property_guids,
+                                                        allow_new_permissions)
     return current_sd.get_data(force_recompute=True)
 
 
 def add_permissions_to_security_descriptor(current_security_descriptor, sid_string: str,
                                            access_masks: List['AccessMask'] = None, privilege_guids: List[str] = None,
                                            read_property_guids: List[str] = None,
-                                           write_property_guids: List[str] = None):
+                                           write_property_guids: List[str] = None,
+                                           allow_new_permissions: bool = True):
     """ Given a security descriptor object representing the DACL bytes on an Active Directory object,
     an SID to add permissions for, an optional list of access masks, and an optional list of
     privilege guids, we construct new ACE entries for every access mask and privilege guid we
@@ -133,27 +138,36 @@ def add_permissions_to_security_descriptor(current_security_descriptor, sid_stri
     new_aces = []
     access_masks = access_masks if access_masks is not None else []
     for a_mask in access_masks:
-        new_ace = create_ace_for_allow_access(sid_string, a_mask)
+        new_ace = create_ace_for_access(sid_string, a_mask, allow_new_permissions)
         new_aces.append(new_ace)
 
     guid_access_type_tuples = []
+    # the "access type" is the same int regardless of whether it's an AccessAllowedObjectAce or an
+    # AccessDeniedObjectAce, but I figure this helps understandability a bit, as otherwise people
+    # might think it's a bug
+    object_ace_type = AccessAllowedObjectAce if allow_new_permissions else AccessDeniedObjectAce
     if privilege_guids:
-        guid_access_type_tuples.extend([(guid, AccessAllowedObjectAce.ADS_RIGHT_DS_CONTROL_ACCESS)
+        guid_access_type_tuples.extend([(guid, object_ace_type.ADS_RIGHT_DS_CONTROL_ACCESS)
                                         for guid in privilege_guids])
     if read_property_guids:
-        guid_access_type_tuples.extend([(guid, AccessAllowedObjectAce.ADS_RIGHT_DS_READ_PROP)
+        guid_access_type_tuples.extend([(guid, object_ace_type.ADS_RIGHT_DS_READ_PROP)
                                         for guid in read_property_guids])
     if write_property_guids:
-        guid_access_type_tuples.extend([(guid, AccessAllowedObjectAce.ADS_RIGHT_DS_WRITE_PROP)
+        guid_access_type_tuples.extend([(guid, object_ace_type.ADS_RIGHT_DS_WRITE_PROP)
                                         for guid in write_property_guids])
     for guid, access_type in guid_access_type_tuples:
-        new_ace = create_ace_for_allow_object_operation_or_property_access(sid_string, guid, access_type)
+        new_ace = create_ace_for_object_operation_or_property_access(sid_string, guid, access_type,
+                                                                     allow_new_permissions)
         new_aces.append(new_ace)
 
     if not new_aces:
         return current_security_descriptor
 
-    current_security_descriptor[DACL].append_aces(new_aces)
+    if allow_new_permissions:
+        current_security_descriptor[DACL].append_aces(new_aces)
+    else:
+        # DENY ACEs go at the beginning because ACEs are evaluated in order until one matches
+        current_security_descriptor[DACL].prepend_aces(new_aces)
 
     return current_security_descriptor
 
@@ -162,43 +176,53 @@ def create_ace_for_allow_access(sid_string: str, access_mask: 'AccessMask'):
     """ Construct an Access Control Entry (ACE) granting the provided SID the provided permission
     on the object to which the ACE is attached.
     """
-    new_ace = ACE()
-    new_ace[ACE_TYPE] = AccessAllowedAce.ACE_TYPE
-    # If we're building an ACE from scratch, it's not inherited. We're not propagating this to any
-    # children either, since we're not creating children and if we do they'd be explicitly
-    # managed.
-    # These ACE flags are about inheritance, so since we're not doing any, set them to 0.
-    new_ace[ACE_FLAGS] = 0x00
-
-    # Construct our mask according to the thing we're being granted access for.
-    acedata = AccessAllowedAce()
-    acedata[MASK] = AccessMask()
-    acedata[MASK][MASK] = access_mask
-
-    # construct the sid entry for whatever is getting this access
-    acedata[SID] = ObjectSid()
-    acedata[SID].from_canonical_string_format(sid_string)
-
-    new_ace[ACE_BODY] = acedata
-    return new_ace
+    return create_ace_for_access(sid_string, access_mask, allow=True)
 
 
-def create_ace_for_allow_object_operation_or_property_access(sid_string, privilege_or_property_guid, access_type):
+def create_ace_for_deny_access(sid_string: str, access_mask: 'AccessMask'):
+    """ Construct an Access Control Entry (ACE) denying the provided SID the provided permission
+    on the object to which the ACE is attached.
+    """
+    return create_ace_for_access(sid_string, access_mask, allow=False)
+
+
+def create_ace_for_allow_object_operation_or_property_access(sid_string: str, privilege_or_property_guid: str,
+                                                             access_type: int):
     """ Construct an Access Control Entry (ACE) granting the provided SID control access to a
     specific sub-privilege within the object control area of the object to which the ACE is
     attached.
     """
+    return create_ace_for_object_operation_or_property_access(sid_string, privilege_or_property_guid, access_type,
+                                                              allow=True)
+
+
+def create_ace_for_deny_object_operation_or_property_access(sid_string: str, privilege_or_property_guid: str,
+                                                            access_type: int):
+    """ Construct an Access Control Entry (ACE) denying the provided SID control access to a
+    specific sub-privilege within the object control area of the object to which the ACE is
+    attached.
+    """
+    return create_ace_for_object_operation_or_property_access(sid_string, privilege_or_property_guid, access_type,
+                                                              allow=False)
+
+
+def create_ace_for_object_operation_or_property_access(sid_string: str, privilege_or_property_guid: str,
+                                                       access_type: int, allow: bool):
+    """ Construct an Access Control Entry (ACE) allowing or denying the provided SID control access to a
+    specific sub-privilege within the object control area of the object to which the ACE is
+    attached.
+    """
     new_ace = ACE()
-    new_ace[ACE_TYPE] = AccessAllowedObjectAce.ACE_TYPE
+    new_ace[ACE_TYPE] = AccessAllowedObjectAce.ACE_TYPE if allow else AccessDeniedAce.ACE_TYPE
     # If we're building an ACE from scratch, it's not inherited. We're not propagating this to any
     # children either, since we're not creating children and if we do they'd be explicitly
     # managed.
     # These ACE flags are about inheritance, so since we're not doing any, set them to 0.
     new_ace[ACE_FLAGS] = 0x00
 
-    ace_data = AccessAllowedObjectAce()
-    # grant ourselves the appropriate mask based on our access type. this could be invoking a privileged operation,
-    # or reading/writing a property
+    ace_data = AccessAllowedObjectAce() if allow else AccessDeniedObjectAce()
+    # grant/deny ourselves the appropriate mask based on our access type. this could be invoking a privileged
+    # operation, or reading/writing a property
     ace_data[MASK] = AccessMask()
     ace_data[MASK][MASK] = access_type
 
@@ -215,6 +239,31 @@ def create_ace_for_allow_object_operation_or_property_access(sid_string, privile
     ace_data[FLAGS] = AccessAllowedObjectAce.ACE_OBJECT_TYPE_PRESENT
 
     new_ace[ACE_BODY] = ace_data
+    return new_ace
+
+
+def create_ace_for_access(sid_string: str, access_mask: 'AccessMask', allow: bool):
+    """ Construct an Access Control Entry (ACE) either allowing or denying the provided SID the provided permission
+    on the object to which the ACE is attached.
+    """
+    new_ace = ACE()
+    new_ace[ACE_TYPE] = AccessAllowedAce.ACE_TYPE if allow else AccessDeniedAce.ACE_TYPE
+    # If we're building an ACE from scratch, it's not inherited. We're not propagating this to any
+    # children either, since we're not creating children and if we do they'd be explicitly
+    # managed.
+    # These ACE flags are about inheritance, so since we're not doing any, set them to 0.
+    new_ace[ACE_FLAGS] = 0x00
+
+    # Construct our mask according to the thing we're being granted access for.
+    acedata = AccessAllowedAce() if allow else AccessDeniedAce()
+    acedata[MASK] = AccessMask()
+    acedata[MASK][MASK] = access_mask
+
+    # construct the sid entry for whatever is getting this access
+    acedata[SID] = ObjectSid()
+    acedata[SID].from_canonical_string_format(sid_string)
+
+    new_ace[ACE_BODY] = acedata
     return new_ace
 
 
