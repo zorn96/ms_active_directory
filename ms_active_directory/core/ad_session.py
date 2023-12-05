@@ -3770,6 +3770,208 @@ class ADSession:
         return self.overwrite_attributes_for_object(computer, attribute_to_value_map, controls,
                                                     raise_exception_on_failure, skip_validation=skip_validation)
 
+    def _move_or_rename_object_by_dn(self, ad_object: Union[str, ADObject], new_parent_dn: str = None,
+                                     new_name: str = None, controls: List[Control] = None,
+                                     raise_exception_on_failure: bool = True,
+                                     skip_validation: bool = False) -> bool:
+        """ Our helper function for moving an AD object from one place to another or renaming it.
+
+        :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
+        :param new_parent_dn: The new DN to move the object to.
+        :param new_name: The new common name for the object in its current DN.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        ad_object = self._validate_obj_and_get_ad_obj(ad_object, skip_validation=skip_validation,
+                                                      attrs_needed=[ldap_constants.AD_ATTRIBUTE_COMMON_NAME])
+        object_dn = ad_object.distinguished_name
+        object_name = ad_object.get(ldap_constants.AD_ATTRIBUTE_COMMON_NAME, unpack_one_item_lists=True)
+        new_name = new_name if new_name else object_name
+        action_desc_for_errors = 'renaming' if new_name != object_name else 'moving'
+
+        # do the modification.
+        logger.debug('Attempting modification -> object with common name %s and dn %s to new name %s and parent dn %s',
+                     object_name, object_dn, new_name, new_parent_dn)
+        res = self.ldap_connection.modify_dn(object_dn, object_name, new_superior=new_parent_dn, controls=controls)
+        success, result, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res,
+                                                                                  paginated_response=False)
+        # raise an exception with LDAP details that might be useful to the caller (e.g. bad format of attribute,
+        # insufficient permissions, unwilling to perform due to constraint violation)
+        if raise_exception_on_failure and not success:
+            raise AttributeModificationException('Failed when {} for the object within the domain. LDAP result: {}'
+                                                 .format(action_desc_for_errors, result))
+        return success
+
+    def move_object_by_dn(self, ad_object: Union[str, ADObject], new_parent_dn: str = None,
+                          controls: List[Control] = None, raise_exception_on_failure: bool = True,
+                          skip_validation: bool = False) -> bool:
+        """ Our helper function for moving an AD object from one place to another.
+
+        :param ad_object: Either an ADObject object or string distinguished name referencing the object to be modified.
+        :param new_parent_dn: The new DN to move the object to.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        return self._move_or_rename_object_by_dn(ad_object, new_parent_dn=new_parent_dn, controls=controls,
+                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                 skip_validation=skip_validation)
+
+    def move_user(self, user: Union[str, ADUser], new_parent_dn: str = None,
+                  controls: List[Control] = None, raise_exception_on_failure: bool = True,
+                  skip_validation: bool = False) -> bool:
+        """ Our helper function for moving an AD user from one place to another.
+
+        :param user: Either an ADUser object or string distinguished name referencing the account to be modified.
+        :param new_parent_dn: The new DN to move the object to.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        user = self._validate_user_and_get_user_obj(user, skip_validation=skip_validation)
+        return self._move_or_rename_object_by_dn(user, new_parent_dn=new_parent_dn, controls=controls,
+                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                 skip_validation=skip_validation)
+
+    def move_group(self, group: Union[str, ADGroup], new_parent_dn: str = None,
+                   controls: List[Control] = None, raise_exception_on_failure: bool = True,
+                   skip_validation: bool = False) -> bool:
+        """ Our helper function for moving an AD group from one place to another.
+
+        :param group: Either an ADGroup object or string distinguished name referencing the group to be modified.
+        :param new_parent_dn: The new DN to move the object to.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        group = self._validate_group_and_get_group_obj(group, skip_validation=skip_validation)
+        return self._move_or_rename_object_by_dn(group, new_parent_dn=new_parent_dn, controls=controls,
+                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                 skip_validation=skip_validation)
+
+    def move_computer(self, computer: Union[str, ADComputer], new_parent_dn: str = None,
+                  controls: List[Control] = None, raise_exception_on_failure: bool = True,
+                  skip_validation: bool = False) -> bool:
+        """ Our helper function for moving an AD computer from one place to another.
+
+        :param computer: Either an ADComputer object or string distinguished name referencing the computer to be
+                         modified.
+        :param new_parent_dn: The new DN to move the object to.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        computer = self._validate_computer_and_get_computer_obj(computer, skip_validation=skip_validation)
+        return self._move_or_rename_object_by_dn(computer, new_parent_dn=new_parent_dn, controls=controls,
+                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                 skip_validation=skip_validation)
+
+    def rename_object_by_dn(self, ad_object: Union[str, ADObject], new_name: str = None,
+                            controls: List[Control] = None, raise_exception_on_failure: bool = True,
+                            skip_validation: bool = False) -> bool:
+        """ Our helper function for renaming an object. This acts generically and assumes that the object referenced
+        can be fully renamed by whatever simple common name move is performed. Things like users and computers cannot
+        be renamed by simple common name change, because downstream attributes like principals can also be impacted.
+        But things like OUs can be renamed with this.
+
+        :param ad_object: Either an ADGroup object or string distinguished name referencing the object to be modified.
+        :param new_name: The new common name of the group.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        ad_object = self._validate_obj_and_get_ad_obj(ad_object, skip_validation=skip_validation)
+        return self._move_or_rename_object_by_dn(ad_object, new_name=new_name, controls=controls,
+                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                 skip_validation=skip_validation)
+
+    def rename_group(self, group: Union[str, ADGroup], new_name: str = None,
+                     controls: List[Control] = None, raise_exception_on_failure: bool = True,
+                     skip_validation: bool = False) -> bool:
+        """ Our helper function for renaming a group.
+
+        :param group: Either an ADGroup object or string distinguished name referencing the group to be modified.
+        :param new_name: The new common name of the group.
+        :param controls: LDAP controls to use during the modification operation.
+        :param raise_exception_on_failure: If true, an exception will be raised with additional details if the modify
+                                           fails.
+        :param skip_validation: If true, assume all distinguished names exist and do not look them up.
+                                Defaults to False. This can be used to make this function more performant when
+                                the caller knows all the distinguished names being specified are valid, as it
+                                performs far fewer queries.
+        :returns: True if the operation succeeds, False otherwise.
+        :raises: InvalidLdapParameterException if any attributes or values are malformed.
+        :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
+        :raises: AttributeModificationException if raise_exception_on_failure is True and we fail
+        :raises: Other LDAP exceptions from the ldap3 library if the connection is configured to raise exceptions and
+                 issues are seen such as determining that a value is malformed based on the server schema.
+        """
+        group = self._validate_group_and_get_group_obj(group, skip_validation=skip_validation)
+        return self._move_or_rename_object_by_dn(group, new_name=new_name, controls=controls,
+                                                 raise_exception_on_failure=raise_exception_on_failure,
+                                                 skip_validation=skip_validation)
+
     # generic utilities for figuring out information about the current user with respect to the domain
     # and managing trusts
 
@@ -3889,7 +4091,8 @@ class ADSession:
             raise InvalidLdapParameterException('The user specified must be an ADGroup object or a string group name.')
         return group
 
-    def _validate_obj_and_get_ad_obj(self, ad_object: Union[str, ADObject], skip_validation=False) -> ADObject:
+    def _validate_obj_and_get_ad_obj(self, ad_object: Union[str, ADObject], skip_validation=False,
+                                     attrs_needed: List[str] = None) -> ADObject:
         # get distinguished name and confirm object existence as needed
         if isinstance(ad_object, str):
             if skip_validation:
@@ -3900,7 +4103,7 @@ class ADSession:
                                                     'distinguished name.')
             # do one lookup for existence for better errors
             res = self._find_ad_objects_and_attrs(object_dn, ldap_constants.FIND_ANYTHING_FILTER,
-                                                  BASE, [], 1, ADObject, None)
+                                                  BASE, attrs_needed, 1, ADObject, None)
             if not res:
                 raise ObjectNotFoundException('No object could be found with distinguished name {}'.format(ad_object))
             ad_object = res[0]
