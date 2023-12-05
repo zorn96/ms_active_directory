@@ -3268,6 +3268,7 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+                                Also assumes that null values are intentional and not errors.
         :returns: True if the operation succeeds, False otherwise.
         :raises: InvalidLdapParameterException if any attributes or values are malformed.
         :raises: ObjectNotFoundException if a distinguished name is specified and cannot be found
@@ -3285,9 +3286,11 @@ class ADSession:
             if not isinstance(key, str):
                 raise InvalidLdapParameterException('The attributes specified must all be string LDAP attributes. {} '
                                                     'is not.'.format(key))
-            if value is None:
+            if value is None and not skip_validation:
                 raise InvalidLdapParameterException('Null values may not be specified when {}. A null '
-                                                    'value was specified for {}.'.format(action_desc_for_errors, key))
+                                                    'value was specified for {}. This check can be skipped by '
+                                                    'specifying skip_validation=True when calling the function.'
+                                                    .format(action_desc_for_errors, key))
             changes_dict[key] = (action, ldap_utils.convert_to_ldap_iterable(value))
         # do the modification. do not log our values in case they're sensitive (e.g. passwords)
         logger.debug('Attempting modification of attributes %s for distinguished name %s',
