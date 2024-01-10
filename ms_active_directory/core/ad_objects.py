@@ -112,7 +112,7 @@ class ADObject:
         self.distinguished_name = dn
         self.domain = domain
         self.all_attributes = attributes if attributes else {}
-        self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS)
+        self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS, [])
         # used for __repr__
         self.class_name = 'ADObject'
 
