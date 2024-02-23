@@ -3899,12 +3899,13 @@ class ADSession:
         object_dn = ad_object.distinguished_name
         object_name = ad_object.get(ldap_constants.AD_ATTRIBUTE_COMMON_NAME, unpack_one_item_lists=True)
         new_name = new_name if new_name else object_name
+        new_rdn = 'cn=' + new_name
         action_desc_for_errors = 'renaming' if new_name != object_name else 'moving'
 
         # do the modification.
         logger.debug('Attempting modification -> object with common name %s and dn %s to new name %s and parent dn %s',
                      object_name, object_dn, new_name, new_parent_dn)
-        res = self.ldap_connection.modify_dn(object_dn, object_name, new_superior=new_parent_dn, controls=controls)
+        res = self.ldap_connection.modify_dn(object_dn, new_rdn, new_superior=new_parent_dn, controls=controls)
         success, result, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res,
                                                                                   paginated_response=False)
         # raise an exception with LDAP details that might be useful to the caller (e.g. bad format of attribute,
