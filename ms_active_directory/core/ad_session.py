@@ -268,7 +268,7 @@ class ADSession:
                                       'and object classes {}. LDAP result: {}'.format(object_dn, object_classes,
                                                                                       result))
 
-    def create_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
+    def create_user(self, username: str, first_name: str = None, last_name: str = None, object_location: str = None,
                     user_password: str = None,
                     encryption_types: List[Union[str, security_constants.ADEncryptionType]] = None,
                     common_name: str = None, supports_legacy_behavior: bool = False, skip_validation: bool = False,
@@ -336,9 +336,10 @@ class ADSession:
         return ManagedADUser(username, self.domain, location=object_location, password=user_password,
                              encryption_types=encryption_types, kvno=1, common_name=common_name)
 
-    def create_unmanaged_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
-                              common_name: str = None, supports_legacy_behavior: bool = False,
-                              skip_validation: bool = False, **additional_user_attributes) -> ADUser:
+    def create_unmanaged_user(self, username: str, first_name: str = None, last_name: str = None,
+                              object_location: str = None, common_name: str = None,
+                              supports_legacy_behavior: bool = False, skip_validation: bool = False,
+                              **additional_user_attributes) -> ADUser:
         """ Use the session to create an unmanaged user in the domain and return a user object. This does not
         configure any auth mechanisms for the user like a password or kerberos keys.
         :param username: The login username for the user to create in the AD domain. This will be used to determine
@@ -391,7 +392,16 @@ class ADSession:
 
         # construct common name from first and last names if not specified
         if not common_name:
-            common_name = first_name + ' ' + last_name
+            if first_name and last_name:
+                common_name = first_name + ' ' + last_name
+            elif first_name
+                common_name = first_name
+            elif last_name
+                common_name = last_name
+            else
+                raise ObjectCreationException('Failed to create object with username {}. Either a common name, first '
+                                              'name or last name must be specified'.format(username))
+
         # now we can build our full object distinguished name
         user_dn = ldap_utils.construct_object_distinguished_name(common_name, object_location, self.domain_dns_name)
         if self.dn_exists_in_domain(user_dn):
@@ -409,11 +419,16 @@ class ADSession:
             ldap_constants.AD_ATTRIBUTE_DISPLAY_NAME: common_name,
             ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME: username,
             ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME: user_principal_name,
-            ldap_constants.AD_ATTRIBUTE_GIVEN_NAME: first_name,
-            ldap_constants.AD_ATTRIBUTE_SURNAME: last_name,
             # accounts may be disabled by default if we don't set this
             ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL: ldap_constants.NORMAL_USER,
         }
+
+        if first_name:
+            user_attributes[ldap_constants.AD_ATTRIBUTE_GIVEN_NAME] = first_name
+
+        if last_name:
+            user_attributes[ldap_constants.AD_ATTRIBUTE_SURNAME] = last_name,
+
         logger.info(
             'Attempting to create user in domain %s with the following LDAP attributes: %s and %s additional '
             'attributes', self.domain_dns_name, user_attributes, len(additional_user_attributes))
