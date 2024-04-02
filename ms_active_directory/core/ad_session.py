@@ -3899,7 +3899,7 @@ class ADSession:
         object_dn = ad_object.distinguished_name
         object_name = ad_object.get(ldap_constants.AD_ATTRIBUTE_COMMON_NAME, unpack_one_item_lists=True)
         new_name = new_name if new_name else object_name
-        new_rdn = 'cn=' + new_name
+        new rdn = new_name if new_name.lower().startswith('cn=') else 'cn=' + new_name
         action_desc_for_errors = 'renaming' if new_name != object_name else 'moving'
 
         # do the modification.
