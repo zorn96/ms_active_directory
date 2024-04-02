@@ -429,12 +429,12 @@ class ADSession:
         if last_name:
             user_attributes[ldap_constants.AD_ATTRIBUTE_SURNAME] = last_name,
 
+        # add in our additional account attributes at the end so they can override anything we set here
+        user_attributes.update(additional_user_attributes)
+
         logger.info(
             'Attempting to create user in domain %s with the following LDAP attributes: %s and %s additional '
             'attributes', self.domain_dns_name, user_attributes, len(additional_user_attributes))
-
-        # add in our additional account attributes at the end so they can override anything we set here
-        user_attributes.update(additional_user_attributes)
 
         self._create_object(user_dn, ldap_constants.OBJECT_CLASSES_FOR_USER, user_attributes,
                             sanity_check_for_existence=False)  # we already checked for this
@@ -491,12 +491,13 @@ class ADSession:
             ldap_constants.AD_ATTRIBUTE_COMMON_NAME: group_name,
             ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME: group_name,
         }
-        logger.info(
-            'Attempting to create group in domain %s with the following LDAP attributes: %s and %s additional '
-            'attributes', self.domain_dns_name, group_attributes, len(additional_group_attributes))
 
         # add in our additional account attributes at the end so they can override anything we set here
         group_attributes.update(additional_group_attributes)
+
+        logger.info(
+            'Attempting to create group in domain %s with the following LDAP attributes: %s and %s additional '
+            'attributes', self.domain_dns_name, group_attributes, len(additional_group_attributes))
 
         self._create_object(group_dn, ldap_constants.OBJECT_CLASSES_FOR_GROUP, group_attributes,
                             sanity_check_for_existence=False)  # we already checked for this
@@ -621,12 +622,13 @@ class ADSession:
         # don't include additional attributes for logging in case they're sensitive
         loggable_attributes = copy.deepcopy(computer_attributes)
         del loggable_attributes[ldap_constants.AD_ATTRIBUTE_PASSWORD]
-        logger.info(
-            'Attempting to create computer in domain %s with the following LDAP attributes: %s and %s additional '
-            'attributes', loggable_attributes, len(additional_account_attributes))
 
         # add in our additional account attributes at the end so they can override anything we set here
         computer_attributes.update(additional_account_attributes)
+
+        logger.info(
+            'Attempting to create computer in domain %s with the following LDAP attributes: %s and %s additional '
+            'attributes', loggable_attributes, len(additional_account_attributes))
 
         self._create_object(computer_dn, ldap_constants.OBJECT_CLASSES_FOR_COMPUTER, computer_attributes,
                             sanity_check_for_existence=False)  # we already checked for this
