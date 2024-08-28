@@ -95,7 +95,7 @@ AD_ATTRIBUTE_KVNO = 'msDS-KeyVersionNumber'
 AD_ATTRIBUTE_DNS_HOST_NAME = 'dNSHostName'
 AD_ATTRIBUTE_ADDITIONAL_DNS_HOST_NAME = 'msDS-AdditionalDnsHostName'
 
-# keys for attributes in certificate authrities
+# keys for attributes in certificate authorities
 AD_ATTRIBUTE_CA_CERT = 'caCertificate'
 
 # keys for domains and trusted domains
@@ -114,7 +114,7 @@ AD_TRUST_ATTRIBUTES = 'trustAttributes'
 AD_TRUST_POSIX_OFFSET = 'trustPosixOffset'
 
 # keys related to policies
-AD_ATTRIBUTE_GROUP_POLICY_LINK = 'gpLink'
+AD_ATTRIBUTE_GROUP_POLICY_LINK = 'gPLink' # https://learn.microsoft.com/en-us/windows/win32/adschema/a-gplink
 
 
 # From windows AD docs
