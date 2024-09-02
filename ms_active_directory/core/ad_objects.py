@@ -112,7 +112,7 @@ class ADObject:
         self.distinguished_name = dn
         self.domain = domain
         self.all_attributes = attributes if attributes else {}
-        self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS)
+        self.object_classes = attributes.get(AD_ATTRIBUTE_OBJECT_CLASS, [])
         # used for __repr__
         self.class_name = 'ADObject'
 
@@ -142,7 +142,7 @@ class ADObject:
         """ Get an attribute about the object that isn't explicitly tracked as a member """
         val = self.all_attributes.get(attribute_name)
         # if val is not defined, return None instead of an empty list:
-        if not val:
+        if val == []:
             return None
         # there's a lot of 1-item lists from the ldap3 library
         if isinstance(val, list) and len(val) == 1 and unpack_one_item_lists:

@@ -268,7 +268,7 @@ class ADSession:
                                       'and object classes {}. LDAP result: {}'.format(object_dn, object_classes,
                                                                                       result))
 
-    def create_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
+    def create_user(self, username: str, first_name: str = None, last_name: str = None, object_location: str = None,
                     user_password: str = None,
                     encryption_types: List[Union[str, security_constants.ADEncryptionType]] = None,
                     common_name: str = None, supports_legacy_behavior: bool = False, skip_validation: bool = False,
@@ -336,9 +336,10 @@ class ADSession:
         return ManagedADUser(username, self.domain, location=object_location, password=user_password,
                              encryption_types=encryption_types, kvno=1, common_name=common_name)
 
-    def create_unmanaged_user(self, username: str, first_name: str, last_name: str, object_location: str = None,
-                              common_name: str = None, supports_legacy_behavior: bool = False,
-                              skip_validation: bool = False, **additional_user_attributes) -> ADUser:
+    def create_unmanaged_user(self, username: str, first_name: str = None, last_name: str = None,
+                              object_location: str = None, common_name: str = None,
+                              supports_legacy_behavior: bool = False, skip_validation: bool = False,
+                              **additional_user_attributes) -> ADUser:
         """ Use the session to create an unmanaged user in the domain and return a user object. This does not
         configure any auth mechanisms for the user like a password or kerberos keys.
         :param username: The login username for the user to create in the AD domain. This will be used to determine
@@ -391,7 +392,16 @@ class ADSession:
 
         # construct common name from first and last names if not specified
         if not common_name:
-            common_name = first_name + ' ' + last_name
+            if first_name and last_name:
+                common_name = first_name + ' ' + last_name
+            elif first_name
+                common_name = first_name
+            elif last_name
+                common_name = last_name
+            else
+                raise ObjectCreationException('Failed to create object with username {}. Either a common name, first '
+                                              'name or last name must be specified'.format(username))
+
         # now we can build our full object distinguished name
         user_dn = ldap_utils.construct_object_distinguished_name(common_name, object_location, self.domain_dns_name)
         if self.dn_exists_in_domain(user_dn):
@@ -409,17 +419,22 @@ class ADSession:
             ldap_constants.AD_ATTRIBUTE_DISPLAY_NAME: common_name,
             ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME: username,
             ldap_constants.AD_ATTRIBUTE_USER_PRINCIPAL_NAME: user_principal_name,
-            ldap_constants.AD_ATTRIBUTE_GIVEN_NAME: first_name,
-            ldap_constants.AD_ATTRIBUTE_SURNAME: last_name,
             # accounts may be disabled by default if we don't set this
             ldap_constants.AD_ATTRIBUTE_USER_ACCOUNT_CONTROL: ldap_constants.NORMAL_USER,
         }
-        logger.info(
-            'Attempting to create user in domain %s with the following LDAP attributes: %s and %s additional '
-            'attributes', self.domain_dns_name, user_attributes, len(additional_user_attributes))
+
+        if first_name:
+            user_attributes[ldap_constants.AD_ATTRIBUTE_GIVEN_NAME] = first_name
+
+        if last_name:
+            user_attributes[ldap_constants.AD_ATTRIBUTE_SURNAME] = last_name,
 
         # add in our additional account attributes at the end so they can override anything we set here
         user_attributes.update(additional_user_attributes)
+
+        logger.info(
+            'Attempting to create user in domain %s with the following LDAP attributes: %s and %s additional '
+            'attributes', self.domain_dns_name, user_attributes, len(additional_user_attributes))
 
         self._create_object(user_dn, ldap_constants.OBJECT_CLASSES_FOR_USER, user_attributes,
                             sanity_check_for_existence=False)  # we already checked for this
@@ -476,12 +491,13 @@ class ADSession:
             ldap_constants.AD_ATTRIBUTE_COMMON_NAME: group_name,
             ldap_constants.AD_ATTRIBUTE_SAMACCOUNT_NAME: group_name,
         }
-        logger.info(
-            'Attempting to create group in domain %s with the following LDAP attributes: %s and %s additional '
-            'attributes', self.domain_dns_name, group_attributes, len(additional_group_attributes))
 
         # add in our additional account attributes at the end so they can override anything we set here
         group_attributes.update(additional_group_attributes)
+
+        logger.info(
+            'Attempting to create group in domain %s with the following LDAP attributes: %s and %s additional '
+            'attributes', self.domain_dns_name, group_attributes, len(additional_group_attributes))
 
         self._create_object(group_dn, ldap_constants.OBJECT_CLASSES_FOR_GROUP, group_attributes,
                             sanity_check_for_existence=False)  # we already checked for this
@@ -606,12 +622,13 @@ class ADSession:
         # don't include additional attributes for logging in case they're sensitive
         loggable_attributes = copy.deepcopy(computer_attributes)
         del loggable_attributes[ldap_constants.AD_ATTRIBUTE_PASSWORD]
-        logger.info(
-            'Attempting to create computer in domain %s with the following LDAP attributes: %s and %s additional '
-            'attributes', loggable_attributes, len(additional_account_attributes))
 
         # add in our additional account attributes at the end so they can override anything we set here
         computer_attributes.update(additional_account_attributes)
+
+        logger.info(
+            'Attempting to create computer in domain %s with the following LDAP attributes: %s and %s additional '
+            'attributes', loggable_attributes, len(additional_account_attributes))
 
         self._create_object(computer_dn, ldap_constants.OBJECT_CLASSES_FOR_COMPUTER, computer_attributes,
                             sanity_check_for_existence=False)  # we already checked for this
@@ -3899,12 +3916,13 @@ class ADSession:
         object_dn = ad_object.distinguished_name
         object_name = ad_object.get(ldap_constants.AD_ATTRIBUTE_COMMON_NAME, unpack_one_item_lists=True)
         new_name = new_name if new_name else object_name
+        new rdn = new_name if new_name.lower().startswith('cn=') else 'cn=' + new_name
         action_desc_for_errors = 'renaming' if new_name != object_name else 'moving'
 
         # do the modification.
         logger.debug('Attempting modification -> object with common name %s and dn %s to new name %s and parent dn %s',
                      object_name, object_dn, new_name, new_parent_dn)
-        res = self.ldap_connection.modify_dn(object_dn, object_name, new_superior=new_parent_dn, controls=controls)
+        res = self.ldap_connection.modify_dn(object_dn, new_rdn, new_superior=new_parent_dn, controls=controls)
         success, result, response, _ = ldap_utils.process_ldap3_conn_return_value(self.ldap_connection, res,
                                                                                   paginated_response=False)
         # raise an exception with LDAP details that might be useful to the caller (e.g. bad format of attribute,
