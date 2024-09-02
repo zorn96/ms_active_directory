@@ -158,12 +158,12 @@ groups that users were successfully added to will be returned instead.
     group2_name = 'target-group2'
     privileged_group = 'group-that-will-fail'
 
-    succeeeded = session.add_users_to_groups([user1_name, user2_name],
-                                             [group1_name, group2_name, privileged_group],
-                                             stop_and_rollback_on_error=False)
+    succeeded = session.add_users_to_groups([user1_name, user2_name],
+                                            [group1_name, group2_name, privileged_group],
+                                            stop_and_rollback_on_error=False)
     # this will print "['target-group1', 'target-group2']" assuming that
     # adding users to 'group-that-will-fail' failed
-    print(succeeeded)
+    print(succeeded)
 
 
 Adding groups to groups
