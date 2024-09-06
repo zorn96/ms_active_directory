@@ -394,11 +394,11 @@ class ADSession:
         if not common_name:
             if first_name and last_name:
                 common_name = first_name + ' ' + last_name
-            elif first_name
+            elif first_name:
                 common_name = first_name
-            elif last_name
+            elif last_name:
                 common_name = last_name
-            else
+            else:
                 raise ObjectCreationException('Failed to create object with username {}. Either a common name, first '
                                               'name or last name must be specified'.format(username))
 
@@ -3916,7 +3916,7 @@ class ADSession:
         object_dn = ad_object.distinguished_name
         object_name = ad_object.get(ldap_constants.AD_ATTRIBUTE_COMMON_NAME, unpack_one_item_lists=True)
         new_name = new_name if new_name else object_name
-        new rdn = new_name if new_name.lower().startswith('cn=') else 'cn=' + new_name
+        new_rdn = new_name if new_name.lower().startswith('cn=') else 'cn=' + new_name
         action_desc_for_errors = 'renaming' if new_name != object_name else 'moving'
 
         # do the modification.
