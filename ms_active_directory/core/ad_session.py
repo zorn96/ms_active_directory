@@ -309,7 +309,7 @@ class ADSession:
         logger.debug('Request to create managed user in domain %s with the following attributes: username=%s, '
                      'first_name=%s, last_name=%s, object_location=%s, encryption_types=%s, '
                      'supports_legacy_behavior=%s, number of additional attributes specified: %s',
-                     self.domain_dns_name, first_name, last_name, object_location, encryption_types,
+                     self.domain_dns_name, username, first_name, last_name, object_location, encryption_types,
                      supports_legacy_behavior, len(additional_user_attributes))
 
         if user_password is None:
@@ -371,8 +371,9 @@ class ADSession:
         """
         logger.debug('Request to create user in domain %s with the following attributes: username=%s, '
                      'first_name=%s, last_name=%s, object_location=%s, supports_legacy_behavior=%s, number of '
-                     'additional attributes specified: %s', self.domain_dns_name, first_name, last_name,
-                     object_location, supports_legacy_behavior, len(additional_user_attributes))
+                     'additional attributes specified: %s', self.domain_dns_name, username,
+                     first_name, last_name, object_location, supports_legacy_behavior,
+                     len(additional_user_attributes))
 
         # validate our username
         username = ldap_utils.validate_and_normalize_logon_name(username, supports_legacy_behavior)
@@ -394,11 +395,11 @@ class ADSession:
         if not common_name:
             if first_name and last_name:
                 common_name = first_name + ' ' + last_name
-            elif first_name
+            elif first_name:
                 common_name = first_name
-            elif last_name
+            elif last_name:
                 common_name = last_name
-            else
+            else:
                 raise ObjectCreationException('Failed to create object with username {}. Either a common name, first '
                                               'name or last name must be specified'.format(username))
 
@@ -628,7 +629,7 @@ class ADSession:
 
         logger.info(
             'Attempting to create computer in domain %s with the following LDAP attributes: %s and %s additional '
-            'attributes', loggable_attributes, len(additional_account_attributes))
+            'attributes', self.domain_dns_name, loggable_attributes, len(additional_account_attributes))
 
         self._create_object(computer_dn, ldap_constants.OBJECT_CLASSES_FOR_COMPUTER, computer_attributes,
                             sanity_check_for_existence=False)  # we already checked for this
@@ -3916,7 +3917,7 @@ class ADSession:
         object_dn = ad_object.distinguished_name
         object_name = ad_object.get(ldap_constants.AD_ATTRIBUTE_COMMON_NAME, unpack_one_item_lists=True)
         new_name = new_name if new_name else object_name
-        new rdn = new_name if new_name.lower().startswith('cn=') else 'cn=' + new_name
+        new_rdn = new_name if new_name.lower().startswith('cn=') else 'cn=' + new_name
         action_desc_for_errors = 'renaming' if new_name != object_name else 'moving'
 
         # do the modification.

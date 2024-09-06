@@ -239,7 +239,7 @@ def process_hex_string_keytab_file_to_extract_entries(keytab: str) -> List[GssKe
                 num_components = _read_bytes_as_number(keytab, index=current_keytab_position,
                                                        bytes_to_read=NUM_COMPONENTS_FIELD_SIZE_BYTES,
                                                        keytab_format_version=keytab_format_version)
-                logger.debug('Reading %s components from keytab entry in slot', num_components, slot)
+                logger.debug('Reading %s components from keytab entry in slot %s', num_components, slot)
 
                 # the number of components encoded in a format v1 keytab is 1 greater than it is supposed to be
                 if keytab_format_version == 1:
