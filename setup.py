@@ -2,7 +2,7 @@
 
 from setuptools import setup
 
-version = '1.13.0'
+version = '1.14.1'
 author = 'Azaria Zornberg'
 email = 'a.zornberg96@gmail.com'
 license_str = 'MIT License'
@@ -63,6 +63,7 @@ setup(name=package_name,
                    'Programming Language :: Python :: 3.8',
                    'Programming Language :: Python :: 3.9',
                    'Programming Language :: Python :: 3.10',
+                   'Programming Language :: Python :: 3.11',
                    'Topic :: Security',
                    'Topic :: Software Development :: Libraries :: Python Modules',
                    'Topic :: System :: Systems Administration :: Authentication/Directory :: LDAP'],
