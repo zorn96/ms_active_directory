@@ -2535,9 +2535,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param strict: If true, assume that all distinguished names are not already group members and that the target
-                       groups already exist. This removes idempotency. Increases performance significantly when working
-                       with large groups.
+        :param strict: If true, assume that all distinguished names are not already group members in any of the target
+                       groups and that the target groups exist. This removes idempotency. Increases performance
+                       significantly when working with large groups.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if any groups being added also exist in the groups to add them to, or
@@ -2571,9 +2571,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param strict: If true, assume that all distinguished names are not already group members and that the target
-                       groups already exist. This removes idempotency. Increases performance significantly when working
-                       with large groups.
+        :param strict: If true, assume that all distinguished names are not already group members in any of the target
+                       groups and that the target groups exist. This removes idempotency. Increases performance
+                       significantly when working with large groups.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to add users to any groups and rollback succeeds.
@@ -2606,9 +2606,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param strict: If true, assume that all distinguished names are not already group members and that the target
-                       groups already exist. This removes idempotency. Increases performance significantly when working
-                       with large groups.
+        :param strict: If true, assume that all distinguished names are not already group members in any of the target
+                       groups and that the target groups exist. This removes idempotency. Increases performance
+                       significantly when working with large groups.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to add computers to any groups and rollback succeeds.
@@ -2642,9 +2642,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param strict: If true, assume that all distinguished names are currently group members and that the target
-                       groups already exist. This removes idempotency. Increases performance significantly when working
-                       with large groups.
+        :param strict: If true, assume that all distinguished names are currently group members in all target groups
+                       and that the target groups exist. This removes idempotency. Increases performance significantly
+                       when working with large groups.
         :returns: A list of groups that successfully had members removed. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to remove groups from any other groups and rollback succeeds
@@ -2678,9 +2678,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param strict: If true, assume that all distinguished names are currently group members and that the target
-                       groups already exist. This removes idempotency. Increases performance significantly when working
-                       with large groups.
+        :param strict: If true, assume that all distinguished names are currently group members in all target groups
+                       and that the target groups exist. This removes idempotency. Increases performance significantly
+                       when working with large groups.
         :returns: A list of groups that successfully had members removed. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to remove users from any groups and rollback succeeds
@@ -2715,9 +2715,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
-        :param strict: If true, assume that all distinguished names are currently group members and that the target
-                       groups already exist. This removes idempotency. Increases performance significantly when working
-                       with large groups.
+        :param strict: If true, assume that all distinguished names are currently group members in all target groups
+                       and that the target groups exist. This removes idempotency. Increases performance significantly
+                       when working with large groups.
         :returns: A list of groups that successfully had members removed. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to remove computers from any groups and rollback succeeds
