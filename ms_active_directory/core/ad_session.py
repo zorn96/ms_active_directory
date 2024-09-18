@@ -2428,8 +2428,7 @@ class ADSession:
                                              groups_to_modify: List[Union[str, ADGroup]],
                                              member_lookup_fn: callable, stop_and_rollback_on_error: bool,
                                              adding: bool, controls: List[Control],
-                                             skip_validation: bool,
-                                             strict: bool = False) -> List[Union[str, ADGroup]]:
+                                             skip_validation: bool, strict: bool) -> List[Union[str, ADGroup]]:
         """ Either add or remove members to/from groups. Members may be users or groups or string distinguished names.
         If there are any failures adding/removing for a group, and stop_and_rollback_on_error is True, we will attempt
         to undo the changes that have been done. If rollback fails, we will raise an exception. If it succeeds, we still
@@ -2487,9 +2486,9 @@ class ADSession:
                         # don't attempt to rollback the rollback
                         self._something_members_to_or_from_groups(member_dn_list, successful_groups, member_lookup_fn,
                                                                   stop_and_rollback_on_error=False, adding=new_op,
-                                                                  # we already validated and don't need to redo it
-                                                                  # on rollback
-                                                                  controls=controls, skip_validation=True)
+                                                                  # we already validated and checked for idempotency
+                                                                  # don't need to redo it on rollback
+                                                                  controls=controls, skip_validation=True, strict=True)
                     except MembershipModificationException:
                         logger.error('Failed to completely rollback changes after failure. '
                                      'Halting and raising exception')
@@ -2518,9 +2517,9 @@ class ADSession:
     def add_groups_to_groups(self, groups_to_add: List[Union[str, ADGroup]],
                              groups_to_add_them_to: List[Union[str, ADGroup]],
                              stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                             skip_validation: bool = False) -> List[Union[str, ADGroup]]:
-        """ Add one or more groups to one or more other groups as members. This function attempts to be idempotent
-        and will not re-add groups that are already members.
+                             skip_validation: bool = False, strict: bool = False) -> List[Union[str, ADGroup]]:
+        """ Add one or more groups to one or more other groups as members. By default, this function attempts to be
+        idempotent and will not re-add groups that are already members.
 
         :param groups_to_add: A list of groups to add to other groups. These may either be ADGroup objects or string
                               name identifiers for groups.
@@ -2536,6 +2535,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param strict: If true, assume that all distinguished names are not already group members and that the target
+                       groups already exist. This removes idempotency. Increases performance significantly when working
+                       with large groups.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if any groups being added also exist in the groups to add them to, or
@@ -2546,13 +2548,13 @@ class ADSession:
         """
         return self._something_members_to_or_from_groups(groups_to_add, groups_to_add_them_to, self.find_group_by_name,
                                                          stop_and_rollback_on_error, adding=True, controls=controls,
-                                                         skip_validation=skip_validation)
+                                                         skip_validation=skip_validation, strict=strict)
 
     def add_users_to_groups(self, users_to_add: List[Union[str, ADUser]],
                             groups_to_add_them_to: List[Union[str, ADGroup]],
                             stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                            skip_validation: bool = False) -> List[Union[str, ADGroup]]:
-        """ Add one or more users to one or more groups as members. This function attempts to be idempotent
+                            skip_validation: bool = False, strict: bool = False) -> List[Union[str, ADGroup]]:
+        """ Add one or more users to one or more groups as members. By default, this function attempts to be idempotent
         and will not re-add users that are already members.
 
         :param users_to_add: A list of users to add to other groups. These may either be ADUser objects or string
@@ -2569,6 +2571,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param strict: If true, assume that all distinguished names are not already group members and that the target
+                       groups already exist. This removes idempotency. Increases performance significantly when working
+                       with large groups.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to add users to any groups and rollback succeeds.
@@ -2578,14 +2583,14 @@ class ADSession:
         """
         return self._something_members_to_or_from_groups(users_to_add, groups_to_add_them_to, self.find_user_by_name,
                                                          stop_and_rollback_on_error, adding=True, controls=controls,
-                                                         skip_validation=skip_validation)
+                                                         skip_validation=skip_validation, strict=strict)
 
     def add_computers_to_groups(self, computers_to_add: List[Union[str, ADComputer]],
                                 groups_to_add_them_to: List[Union[str, ADGroup]],
                                 stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                                skip_validation: bool = False) -> List[Union[str, ADGroup]]:
-        """ Add one or more computers to one or more groups as members. This function attempts to be idempotent
-        and will not re-add computers that are already members.
+                                skip_validation: bool = False, strict: bool = False) -> List[Union[str, ADGroup]]:
+        """ Add one or more computers to one or more groups as members. By default, this function attempts to be
+        idempotent and will not re-add computers that are already members.
 
         :param computers_to_add: A list of computers to add to other groups. These may either be ADComputer objects or
                                  string name identifiers for computers.
@@ -2601,6 +2606,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param strict: If true, assume that all distinguished names are not already group members and that the target
+                       groups already exist. This removes idempotency. Increases performance significantly when working
+                       with large groups.
         :returns: A list of groups that successfully had members added. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to add computers to any groups and rollback succeeds.
@@ -2611,14 +2619,14 @@ class ADSession:
         return self._something_members_to_or_from_groups(computers_to_add, groups_to_add_them_to,
                                                          self.find_computer_by_name, stop_and_rollback_on_error,
                                                          adding=True, controls=controls,
-                                                         skip_validation=skip_validation)
+                                                         skip_validation=skip_validation, strict=strict)
 
     def remove_groups_from_groups(self, groups_to_remove: List[Union[str, ADGroup]],
                                   groups_to_remove_them_from: List[Union[str, ADGroup]],
                                   stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                                  skip_validation: bool = False) -> List[Union[str, ADGroup]]:
-        """ Remove one or more groups from one or more groups as members. This function attempts to be idempotent
-        and will not remove groups that are not already members.
+                                  skip_validation: bool = False, strict: bool = False) -> List[Union[str, ADGroup]]:
+        """ Remove one or more groups from one or more groups as members. By default, this function attempts to be
+        idempotent and will not remove groups that are not already members.
 
         :param groups_to_remove: A list of groups to remove from other groups. These may either be ADGroup objects or
                                  string name identifiers for groups.
@@ -2634,6 +2642,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param strict: If true, assume that all distinguished names are currently group members and that the target
+                       groups already exist. This removes idempotency. Increases performance significantly when working
+                       with large groups.
         :returns: A list of groups that successfully had members removed. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to remove groups from any other groups and rollback succeeds
@@ -2644,14 +2655,14 @@ class ADSession:
         return self._something_members_to_or_from_groups(groups_to_remove, groups_to_remove_them_from,
                                                          self.find_group_by_name, stop_and_rollback_on_error,
                                                          adding=False, controls=controls,
-                                                         skip_validation=skip_validation)
+                                                         skip_validation=skip_validation, strict=strict)
 
     def remove_users_from_groups(self, users_to_remove: List[Union[str, ADUser]],
                                  groups_to_remove_them_from: List[Union[str, ADGroup]],
                                  stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                                 skip_validation: bool = False) -> List[Union[str, ADGroup]]:
-        """ Remove one or more users from one or more groups as members. This function attempts to be idempotent
-        and will not remove users that are not already members.
+                                 skip_validation: bool = False, strict: bool = False) -> List[Union[str, ADGroup]]:
+        """ Remove one or more users from one or more groups as members. By default, this function attempts to be
+        idempotent and will not remove users that are not already members.
 
         :param users_to_remove: A list of users to remove from groups. These may either be ADUsers objects or
                                 string name identifiers for users.
@@ -2667,6 +2678,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param strict: If true, assume that all distinguished names are currently group members and that the target
+                       groups already exist. This removes idempotency. Increases performance significantly when working
+                       with large groups.
         :returns: A list of groups that successfully had members removed. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to remove users from any groups and rollback succeeds
@@ -2677,14 +2691,15 @@ class ADSession:
         return self._something_members_to_or_from_groups(users_to_remove, groups_to_remove_them_from,
                                                          self.find_user_by_name, stop_and_rollback_on_error,
                                                          adding=False, controls=controls,
-                                                         skip_validation=skip_validation)
+                                                         skip_validation=skip_validation,
+                                                         strict=strict)
 
     def remove_computers_from_groups(self, computers_to_remove: List[Union[str, ADComputer]],
                                      groups_to_remove_them_from: List[Union[str, ADGroup]],
                                      stop_and_rollback_on_error: bool = True, controls: List[Control] = None,
-                                     skip_validation: bool = False) -> List[Union[str, ADGroup]]:
-        """ Remove one or more computers from one or more groups as members. This function attempts to be idempotent
-        and will not remove computers that are not already members.
+                                     skip_validation: bool = False, strict: bool = False) -> List[Union[str, ADGroup]]:
+        """ Remove one or more computers from one or more groups as members. By default, this function attempts to be
+        idempotent and will not remove computers that are not already members.
 
         :param computers_to_remove: A list of computers to remove from groups. These may either be ADComputer objects or
                                     string name identifiers for computers.
@@ -2700,6 +2715,9 @@ class ADSession:
                                 Defaults to False. This can be used to make this function more performant when
                                 the caller knows all the distinguished names being specified are valid, as it
                                 performs far fewer queries.
+        :param strict: If true, assume that all distinguished names are currently group members and that the target
+                       groups already exist. This removes idempotency. Increases performance significantly when working
+                       with large groups.
         :returns: A list of groups that successfully had members removed. This will always be all the groups unless
                   stop_and_rollback_on_error is False.
         :raises: MembershipModificationException if we fail to remove computers from any groups and rollback succeeds
@@ -2710,7 +2728,7 @@ class ADSession:
         return self._something_members_to_or_from_groups(computers_to_remove, groups_to_remove_them_from,
                                                          self.find_computer_by_name, stop_and_rollback_on_error,
                                                          adding=False, controls=controls,
-                                                         skip_validation=skip_validation)
+                                                         skip_validation=skip_validation, strict=strict)
 
     # Functions for managing permissions within the domain
 
