@@ -2427,7 +2427,8 @@ class ADSession:
                                              groups_to_modify: List[Union[str, ADGroup]],
                                              member_lookup_fn: callable, stop_and_rollback_on_error: bool,
                                              adding: bool, controls: List[Control],
-                                             skip_validation: bool) -> List[Union[str, ADGroup]]:
+                                             skip_validation: bool,
+                                             strict: bool = False) -> List[Union[str, ADGroup]]:
         """ Either add or remove members to/from groups. Members may be users or groups or string distinguished names.
         If there are any failures adding/removing for a group, and stop_and_rollback_on_error is True, we will attempt
         to undo the changes that have been done. If rollback fails, we will raise an exception. If it succeeds, we still
@@ -2467,8 +2468,9 @@ class ADSession:
         for group_dn in target_group_list:
             logger.info('Attempting to %s the following members to/from group %s : %s', verb, member_dn_list,
                         group_dn)
-            # by setting fix to True, we ignore members already in the group and make this idempotent
-            res = member_modify_fn(member_dn_list, [group_dn], fix=True)
+            # when fix is True, we ignore members already in the group and make this idempotent, otherwise this should
+            # only be called on non-members (strict)
+            res = member_modify_fn(member_dn_list, [group_dn], fix=not strict)
             # the function returns a boolean on whether it succeeded or not
             if not res:
                 failing_group = group_dn
