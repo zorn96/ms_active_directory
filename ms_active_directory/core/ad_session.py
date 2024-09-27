@@ -1584,7 +1584,7 @@ class ADSession:
             sam_name=computer_name,
             type_filter=ldap_constants.FIND_COMPUTER_FILTER)
         res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
-                                              attributes_to_lookup, 1, ADUser, controls)
+                                              attributes_to_lookup, 1, ADComputer, controls)
         if not res:
             if computer_name.endswith('$'):
                 return None
@@ -1597,7 +1597,7 @@ class ADSession:
                 sam_name=alt_computer_name,
                 type_filter=ldap_constants.FIND_COMPUTER_FILTER)
             res = self._find_ad_objects_and_attrs(self.domain_search_base, search_filter, SUBTREE,
-                                                  attributes_to_lookup, 1, ADUser, controls)
+                                                  attributes_to_lookup, 1, ADComputer, controls)
             if not res:
                 return None
         return res[0]
