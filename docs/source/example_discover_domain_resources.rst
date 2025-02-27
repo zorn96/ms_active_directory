@@ -47,7 +47,7 @@ to succeed and can impact TLS negotiation as well.
 
 Finding the domain functional level
 -----------------------------------
-Discovering the domain time can be done without needing to create a session
+Discovering the domain functional level can be done without needing to create a session
 with a domain, as it can inform us as to what encryption types and TLS versions/ciphers
 will be supported by the domain.
 ::
@@ -81,7 +81,7 @@ service is privileged.
 
 Finding CA certificates
 ------------------------
-Discovering DNS servers requires an authenticated session with the domain,
+Discovering CA certificates requires an authenticated session with the domain,
 as searching the records within the domain for records that are indicated
 as being certificate authorities is privileged.
 
